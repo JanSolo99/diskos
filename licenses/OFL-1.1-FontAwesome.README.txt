@@ -1,0 +1,15 @@
+Font Awesome Free glyphs are embedded in the diskOS UI binary (payload/mq_ui) via LVGL's built-in
+symbol font (LV_SYMBOL_*). Font Awesome Free licensing:
+  - Fonts:  SIL OFL 1.1
+  - Icons:  CC BY 4.0
+  - Code:   MIT
+
+The verbatim texts are shipped in this directory:
+  - OFL-1.1-FontAwesome.txt  = Font Awesome's own LICENSE.txt (Copyright (c) Fonticons, Inc.),
+                               which contains the full SIL OFL 1.1 text (with the "Font Awesome"
+                               reserved font name) plus the MIT code license and the CC BY reference.
+  - CC-BY-4.0.txt            = the full Creative Commons Attribution 4.0 International legal code.
+
+Canonical sources:
+  - https://github.com/FortAwesome/Font-Awesome  (LICENSE.txt)
+  - https://creativecommons.org/licenses/by/4.0/legalcode.txt
