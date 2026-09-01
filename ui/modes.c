@@ -21,7 +21,11 @@ static lv_obj_t *g_check[N_MODES];   /* per-row checkmark label */
 static lv_obj_t *g_row[N_MODES];     /* per-row button (for the selected highlight) */
 
 static void mark_selected(void){
-    int cur = ui_get_source_mode();
+    /* Show the EFFECTIVE mode, not our own last request: the player can enter USB
+     * storage by itself when a computer is plugged in, and a tick beside "Local
+     * Playback" while nothing will play is exactly the confusion this screen caused
+     * ("won't play even though it's on Local Playback"). */
+    int cur = ui_source_mode_effective();
     for(int i=0;i<N_MODES;i++){
         if(g_check[i]){ lv_label_set_text(g_check[i], i==cur ? LV_SYMBOL_OK : "");
                         lv_obj_set_style_text_color(g_check[i], ui_current_accent(), 0); }  /* track accent changes */
@@ -108,4 +112,74 @@ void modes_create(lv_obj_t *root){
         lv_obj_set_style_text_font(g_check[i], th_font(18), 0);
     }
     mark_selected();
+}
+
+
+/* ---- "plugged into a computer" prompt -------------------------------------
+ * Shown when the player opens the card as USB storage on its own and the user has
+ * left "On USB Connect" on Ask. Three outcomes, all one tap, and no default action
+ * is taken behind their back: whatever they pick becomes the mode.
+ *
+ * Lives on lv_layer_top rather than being a screen, so it survives whatever the
+ * user was looking at and does not disturb the nav stack. */
+static lv_obj_t *g_usb_dlg;
+
+static void usb_dlg_close(void){
+    if(g_usb_dlg){ lv_obj_delete_async(g_usb_dlg); g_usb_dlg = NULL; }
+}
+static void usb_pick_cb(lv_event_t *e){
+    if(lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    int mode = (int)(intptr_t)lv_event_get_user_data(e);
+    usb_dlg_close();
+    if(mode < 0) return;                     /* "Not now": leave the player as it is */
+    if(ui_set_source_mode(mode) != 0){ ui_toast("Couldn't switch mode"); return; }
+    static const char *msg[4] = { "Charging \xE2\x80\x93 still playing", "USB DAC", NULL,
+                                  "Card open on the computer" };
+    if(mode >= 0 && mode < 4 && msg[mode]) ui_toast(msg[mode]);
+}
+static void usb_dlg_btn(lv_obj_t *card, int y, const char *txt, int mode, int primary){
+    lv_obj_t *b = lv_button_create(card);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, 232, 40);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, y);
+    lv_obj_set_style_radius(b, 12, 0);
+    lv_obj_set_style_bg_color(b, primary ? ui_current_accent() : th_card_press(), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(b, usb_pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)mode);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_set_style_text_font(l, th_font(15), 0);
+    lv_obj_set_style_text_color(l, th_text(), 0);
+    lv_obj_center(l);
+}
+void usbprompt_show(void){
+    usb_dlg_close();
+    g_usb_dlg = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(g_usb_dlg);
+    lv_obj_set_size(g_usb_dlg, 360, 360); lv_obj_center(g_usb_dlg);
+    lv_obj_set_style_bg_color(g_usb_dlg, th_bg(), 0);
+    lv_obj_set_style_bg_opa(g_usb_dlg, LV_OPA_80, 0);
+    lv_obj_clear_flag(g_usb_dlg, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_usb_dlg, LV_OBJ_FLAG_CLICKABLE);   /* absorb taps meant for the screen behind */
+
+    lv_obj_t *card = lv_obj_create(g_usb_dlg);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, 268, 246); lv_obj_center(card);
+    lv_obj_set_style_radius(card, 18, 0);
+    lv_obj_set_style_bg_color(card, th_card(), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *t = lv_label_create(card);
+    lv_label_set_text(t, "Connected to a computer");
+    lv_obj_set_width(t, 236);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 16);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(t, th_font(16), 0);
+    lv_obj_set_style_text_color(t, th_text(), 0);
+
+    usb_dlg_btn(card,  50, "Keep playing",      0, 1);
+    usb_dlg_btn(card,  96, "Open the card",     3, 0);
+    usb_dlg_btn(card, 142, "Use as USB DAC",    1, 0);
+    usb_dlg_btn(card, 188, "Not now",          -1, 0);
 }

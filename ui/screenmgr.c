@@ -305,6 +305,7 @@ void screens_init(void)
     s_roots[SCR_WORKMODE] = screen_make_root(parent);
     s_roots[SCR_DEBUG] = screen_make_root(parent);
     s_roots[SCR_SCAN] = screen_make_root(parent);
+    s_roots[SCR_FONTPICK] = screen_make_root(parent);
 
     /* depth scrim: a full-screen translucent-black overlay, created LAST so it sits above the
      * roots in sibling order; re-parented in z during a transition to dim the screen beneath the
@@ -338,6 +339,7 @@ void screens_init(void)
     modes_create(s_roots[SCR_WORKMODE]);
     debug_create(s_roots[SCR_DEBUG]);
     scanview_create(s_roots[SCR_SCAN]);
+    fontpick_create(s_roots[SCR_FONTPICK]);
     apps_create(s_roots[SCR_APPS]);
     nphub_create(s_roots[SCR_NPHUB]);
     plpick_create(s_roots[SCR_PLPICK]);

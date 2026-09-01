@@ -1,0 +1,138 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 diskOS contributors */
+#include "screens.h"
+#include "config.h"
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>   /* readlink/execv/sync: the UI re-exec that applies theme + font */
+
+/* Font picker: choose the UI typeface.
+ *
+ * "Built-in" is Montserrat, compiled in as glyph arrays. Anything else is a .ttf or
+ * .otf the user dropped on the SD card - in a Fonts folder, or loose in the root -
+ * rendered at runtime by LVGL's tiny_ttf. Every label in the UI goes through
+ * th_font(), so one choice re-faces the whole interface.
+ *
+ * Two honest limitations, stated on screen rather than discovered later:
+ *  - The icon glyphs (play, wifi, battery...) are a separate embedded icon font and
+ *    are NOT replaced; a custom face changes text only.
+ *  - A face with no CJK coverage will show boxes for CJK titles, because the
+ *    built-in Source Han Sans fallback only chains behind the built-in face.
+ *
+ * Selecting a font restarts the UI, for the same reason the theme does: faces are
+ * resolved once when each screen is built. */
+
+#define MAX_FONTS 24
+static lv_obj_t *g_root, *g_list;
+static char g_names[MAX_FONTS][64];
+static int  g_n;
+
+static void restart_now(lv_timer_t *t)
+{
+    if(t) lv_timer_del(t);
+    cfg_flush();
+    sync();
+    char self[512];
+    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+    if(n > 0){ self[n] = 0; char *av[] = { self, NULL }; execv(self, av); }
+    ui_toast("Couldn't restart the UI");
+}
+
+static void pick_cb(lv_event_t *e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    const char *want = (i < 0) ? "Built-in" : g_names[i];
+    if(!strcmp(want, theme_font_name())) { screen_back(); return; }   /* already active */
+    cfg_set_str("font_file", want);
+    ui_toast("Applying font\xE2\x80\xA6");
+    lv_timer_t *t = lv_timer_create(restart_now, 900, NULL);
+    lv_timer_set_repeat_count(t, 1);
+}
+
+static lv_obj_t *row(const char *label, const char *sub, int idx, int selected)
+{
+    lv_obj_t *r = lv_button_create(g_list);
+    lv_obj_remove_style_all(r);
+    lv_obj_set_size(r, 276, sub ? 54 : 46);
+    lv_obj_set_style_radius(r, 12, 0);
+    lv_obj_set_style_bg_color(r, th_card(), 0);
+    lv_obj_set_style_bg_opa(r, LV_OPA_70, 0);
+    lv_obj_set_style_bg_color(r, th_card_press(), LV_STATE_PRESSED);
+    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(r, pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)idx);
+
+    lv_obj_t *l = lv_label_create(r);
+    lv_label_set_text(l, label);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(l, 14, sub ? 8 : 13);
+    lv_obj_set_size(l, 216, 21);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
+    lv_obj_set_style_text_color(l, th_text(), 0);
+
+    if(sub){
+        lv_obj_t *sl = lv_label_create(r);
+        lv_label_set_text(sl, sub);
+        lv_obj_set_pos(sl, 14, 30);
+        lv_obj_set_size(sl, 216, 17);
+        lv_obj_set_style_text_font(sl, th_font(12), 0);
+        lv_obj_set_style_text_color(sl, th_text3(), 0);
+    }
+    if(selected){
+        lv_obj_t *ck = lv_label_create(r);
+        lv_label_set_text(ck, LV_SYMBOL_OK);
+        lv_obj_align(ck, LV_ALIGN_RIGHT_MID, -14, 0);
+        lv_obj_set_style_text_color(ck, ui_current_accent(), 0);
+        lv_obj_set_style_text_font(ck, th_font(16), 0);
+    }
+    return r;
+}
+
+static void note(const char *text)
+{
+    lv_obj_t *l = lv_label_create(g_list);
+    lv_label_set_text(l, text);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(l, 264);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(l, th_font(12), 0);
+    lv_obj_set_style_text_color(l, th_text3(), 0);
+}
+
+void fontpick_open(void)
+{
+    if(!g_root) return;
+    lv_obj_clean(g_root);
+    lv_obj_set_style_bg_color(g_root, th_bg(), 0);
+    lv_obj_set_style_bg_opa(g_root, LV_OPA_COVER, 0);
+    ui_header(g_root, "Font");
+
+    g_list = lv_obj_create(g_root);
+    lv_obj_remove_style_all(g_list);
+    lv_obj_set_pos(g_list, 42, 70);
+    lv_obj_set_size(g_list, 276, 250);
+    lv_obj_set_style_bg_opa(g_list, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_bottom(g_list, 24, 0);
+    lv_obj_set_style_pad_row(g_list, 6, 0);
+    lv_obj_set_flex_flow(g_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(g_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scroll_dir(g_list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(g_list, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_flag(g_list, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+
+    const char *cur = theme_font_name();
+    row("Built-in", "Montserrat", -1, !strcmp(cur, "Built-in"));
+
+    g_n = theme_font_list(g_names, MAX_FONTS);
+    for(int i = 0; i < g_n; i++)
+        row(g_names[i], NULL, i, !strcmp(cur, g_names[i]));
+
+    if(g_n == 0)
+        note("No fonts found.\n\nPut .ttf or .otf files in a folder called Fonts on the SD card, then come back here.");
+    else
+        note("Custom fonts change text only - icons keep their built-in glyphs, and a face without CJK coverage will show boxes for CJK titles.");
+
+    screen_show(SCR_FONTPICK);
+}
+
+void fontpick_create(lv_obj_t *root){ g_root = root; }

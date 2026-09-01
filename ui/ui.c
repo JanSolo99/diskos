@@ -88,6 +88,11 @@ static char last_seed_b[160];
 static char cover_src[48];
 static int  cover_valid;     /* 1 when cover_src points at a freshly decoded cover */
 static int  coverdsc_valid;  /* 1 only when g_coverdsc holds THIS track's RAM decode (else stale) */
+static char g_coverbmp[64];  /* filesystem path of that decode, so the buffer can be rebuilt when
+                              * the Now Playing style flips between square cover and disc */
+static int  g_coverbmp_masked;  /* 1 when the buffer currently holds the disc-masked variant */
+static lv_image_dsc_t g_coverdsc;      /* the RAM cover, defined with load_cover_dsc below */
+static int  load_cover_dsc(const char *path);
 static char thumb_src[48]; /* tiny 42px thumb for the Home pill */
 static int  thumb_valid;
 static char backdrop_src[48]; /* full-screen blurred backdrop */
@@ -482,7 +487,7 @@ static void mode_click_cb(lv_event_t *e)
     }
 }
 
-static int g_np_vinyl = 0;
+static int g_np_vinyl = 0;   /* 1 = Now Playing shows a spinning disc, not a square cover */
 static int g_spinning  = 0;
 
 static void spin_cb(void *var, int32_t v){ lv_image_set_rotation((lv_obj_t *)var, v % 3600); }
@@ -515,6 +520,21 @@ void ui_set_np_style(int vinyl)
 {
     if(!cover) return;
     g_np_vinyl = vinyl;
+    /* The RAM cover is masked to a disc for vinyl and left square for cover mode, so a
+     * style change mid-track has to rebuild it - otherwise switching to Vinyl keeps the
+     * scalloped square, and switching back to Cover leaves a circular hole punched in
+     * the artwork. Cheap (one 148px BMP re-read) and only on an actual style change. */
+    if(coverdsc_valid && g_coverbmp[0] && g_coverbmp_masked != (vinyl ? 1 : 0)){
+        if(load_cover_dsc(g_coverbmp) == 0){
+            if(cover_img){
+                lv_image_set_src(cover_img, &g_coverdsc);
+                lv_obj_invalidate(cover_img);
+            }
+        } else {
+            coverdsc_valid = 0;                       /* re-read failed: fall back to the file BMP */
+            if(cover_img && cover_valid) lv_image_set_src(cover_img, cover_src);
+        }
+    }
     lv_obj_set_style_radius(cover, vinyl ? (COVER_D/2) : 14, LV_PART_MAIN);
     if(spindle) {
         if(vinyl) lv_obj_remove_flag(spindle, LV_OBJ_FLAG_HIDDEN);
@@ -537,13 +557,47 @@ static void set_cover_fallback(bool show)
     }
 }
 
+/* Cut the cover into a DISC in the alpha channel, with a soft edge.
+ *
+ * In vinyl mode the cover object is clipped to a circle and the image inside it is
+ * spun. The image is a SQUARE, so its corners are clipped away while the middles of
+ * its edges (radius r) sweep inside the circle (radius r) - which means the clip
+ * boundary is alternately the image edge and the circle. Rotating that produced a
+ * scalloped, pulsing rim: the "banding when spinning" in the beta review.
+ *
+ * Pre-masking the pixels to the inscribed circle fixes it at the source: the image
+ * is already a disc, so every rotation presents the same silhouette and the clip
+ * never has to do anything. The 1.5px feathered edge also anti-aliases the rim,
+ * which the corner-clip could not do at all.
+ *
+ * Applied to the RAM copy only - the on-disk BMP is untouched, so Cover mode and
+ * the full-screen art still show the full square artwork. */
+static void mask_to_disc(uint8_t *buf, int w, int h)
+{
+    float cx = (w - 1) * 0.5f, cy = (h - 1) * 0.5f;
+    float r  = (w < h ? w : h) * 0.5f - 0.5f;
+    float feather = 1.5f;                      /* soft rim: one-and-a-half pixels */
+    for(int y = 0; y < h; y++){
+        float dy = y - cy;
+        uint8_t *row = buf + (size_t)y * w * 4;
+        for(int x = 0; x < w; x++){
+            float dx = x - cx;
+            float d  = sqrtf(dx*dx + dy*dy);
+            float a;
+            if(d <= r - feather)      a = 1.0f;
+            else if(d >= r)           a = 0.0f;
+            else                      a = (r - d) / feather;
+            row[x*4 + 3] = (uint8_t)(a * 255.0f + 0.5f);
+        }
+    }
+}
+
 /* Decode the 148px cover BMP into a RAM ARGB8888 descriptor. A file-sourced
  * lv_bmp image can't be rotated by the SW renderer (renders black) because the
  * image cache is off; a true-colour RAM buffer transforms fine, so the vinyl
  * can spin. The BMP is 24-bit BGR, bottom-up, 148*3=444 bytes/row (no padding). */
 #define CBMP 148
 static uint8_t g_coverbuf[CBMP*CBMP*4];
-static lv_image_dsc_t g_coverdsc;
 static int load_cover_dsc(const char *path)
 {
     FILE *f = fopen(path, "rb"); if(!f) return -1;
@@ -572,6 +626,11 @@ static int load_cover_dsc(const char *path)
     g_coverdsc.header.stride = CBMP*4;
     g_coverdsc.data          = g_coverbuf;
     g_coverdsc.data_size     = sizeof g_coverbuf;
+    /* Vinyl mode spins this buffer inside a circular clip - pre-cut it to a disc so
+     * the rotating silhouette is constant (see mask_to_disc). Cover mode keeps the
+     * full square, so the rounded-rectangle art is unchanged. */
+    if(g_np_vinyl) mask_to_disc(g_coverbuf, CBMP, CBMP);
+    g_coverbmp_masked = g_np_vinyl ? 1 : 0;
     return 0;
 }
 
@@ -831,6 +890,7 @@ static void apply_art(const art_req_t *job)
     snprintf(cover_src,    sizeof cover_src,    "A:/tmp/cover%d.bmp",    job->idx);
     snprintf(thumb_src,    sizeof thumb_src,    "A:/tmp/thumb%d.bmp",    job->idx);
     snprintf(backdrop_src, sizeof backdrop_src, "A:/tmp/backdrop%d.bmp", job->idx);
+    snprintf(g_coverbmp, sizeof g_coverbmp, "%s", job->out);   /* remember it for a style flip */
     coverdsc_valid = (load_cover_dsc(job->out) == 0);   /* track whether g_coverdsc is THIS track's */
     if(coverdsc_valid) lv_image_set_src(cover_img, &g_coverdsc);
     else               lv_image_set_src(cover_img, cover_src);
@@ -947,6 +1007,7 @@ static void update_cover_for_path(const track_state_t *st)
     if(cover_note) lv_label_set_text(cover_note, LV_SYMBOL_REFRESH);
     set_cover_fallback(true);
     coverdsc_valid = 0;   /* the RAM decode is now the PREVIOUS album's - don't let the accent use stale art */
+    g_coverbmp[0] = '\0';
 
     /* ALWAYS target the non-displayed buffer so an in-flight decode never
      * overwrites the /tmp BMP the shown art may still reference. */
@@ -1181,6 +1242,7 @@ void ui_create(lv_obj_t *root)
     last_seed_a[0] = '\0';
     last_seed_b[0] = '\0';
     cover_src[0] = '\0';
+    g_coverbmp[0] = '\0';
     cover_valid = 0;
     coverdsc_valid = 0;
     thumb_src[0] = '\0';

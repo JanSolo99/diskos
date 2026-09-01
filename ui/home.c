@@ -56,6 +56,15 @@ static void settings_event_cb(lv_event_t *e)
     }
 }
 
+/* Open the Home menu (the swipe-left panel). apps_reload() first so a newly
+ * installed homebrew app shows up without a restart - same as the swipe path. */
+static void menu_open_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    apps_reload();
+    screen_show(SCR_APPS);
+}
+
 static void pp_event_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED)
@@ -305,10 +314,22 @@ void home_create(lv_obj_t *root)
     make_pill(root, 80, 162, 200, 52, LV_SYMBOL_DIRECTORY, "Library",
               nav_event_cb, (void *)(uintptr_t)SCR_LIBRARY);
 
-    /* subtle hint that swiping left reveals more */
-    lv_obj_t *hint = make_label(root, LV_SYMBOL_RIGHT, th_font(14),
-                                th_text3());
-    lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -6, 0);
+    /* Swipe-left affordance. It used to be a bare chevron, which said "there is more
+     * that way" without saying what - so the menu behind it went unfound and people
+     * looked for everything in Settings instead. Naming it is the whole fix, and it
+     * is tappable as well as swipeable. */
+    lv_obj_t *hint_btn = lv_button_create(root);
+    lv_obj_remove_style_all(hint_btn);
+    lv_obj_set_size(hint_btn, 34, 96);
+    lv_obj_align(hint_btn, LV_ALIGN_RIGHT_MID, -2, 0);
+    lv_obj_set_ext_click_area(hint_btn, 8);
+    lv_obj_set_style_radius(hint_btn, 17, 0);
+    lv_obj_set_style_bg_color(hint_btn, th_card(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(hint_btn, LV_OPA_70, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(hint_btn, menu_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *hint = make_label(hint_btn, "M\nE\nN\nU", th_font(12), th_text3());
+    lv_obj_set_width(hint, 34);
+    lv_obj_align(hint, LV_ALIGN_CENTER, 0, 0);
 
     g_np_capsule = lv_button_create(root);
     lv_obj_remove_style_all(g_np_capsule);

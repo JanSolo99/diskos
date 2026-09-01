@@ -7,8 +7,16 @@
 
 /* Quick Settings: an iOS-Control-Center-style pull-down panel (top-edge swipe-down; gesture handled
  * in main.c). Grouped cards on the round 360 screen: a knobless brightness capsule, a transport card,
- * and three labeled shortcut tiles (Wi-Fi / Bluetooth / Sleep) whose state circle turns blue when on.
- * One accent (blue) for state; white glyphs elsewhere. Dismissed by the back-swipe (screen_back). */
+ * and two rows of labeled shortcut tiles whose state circle turns blue when on.
+ * One accent (blue) for state; theme-coloured glyphs elsewhere. Dismissed by the back-swipe.
+ *
+ * The panel used to carry only Wi-Fi / Bluetooth / Sleep, which meant the things people reach for
+ * most - getting back Home from six screens deep, changing EQ, kicking off a music scan, and
+ * switching working mode - were all buried in Settings. Those four are now tiles here.
+ *
+ * Layout is constrained by the ROUND screen: usable width narrows sharply toward the bottom (at
+ * y=302 the chord is only ~264px), so the rows are 4 tiles then 3, not a 4x2 grid, and each row's
+ * total width is checked against the chord at its LOWEST edge. */
 
 LV_FONT_DECLARE(font_icons_28)          /* FontAwesome 28px */
 #define WI_SUN "\xEF\x86\x85"           /* f185 sun */
@@ -49,6 +57,17 @@ static void bt_short_cb(lv_event_t *e){ (void)e;
 }
 static void bt_long_cb(lv_event_t *e){ (void)e; bt_open(); }
 
+/* Home: the escape hatch the stock UI has and diskOS did not. Discards the whole nav
+ * stack, so it behaves the same however deep you are. */
+static void home_cb(lv_event_t *e){ (void)e; screen_home(); }
+/* EQ: tap for the preset picker, hold for the 10-band custom curve. */
+static void eq_cb(lv_event_t *e){ (void)e; settings_open_named("Equalizer"); }
+static void eq_long_cb(lv_event_t *e){ (void)e; screen_show(SCR_EQ); }
+/* Scan: start a library scan and watch it (scanview owns both). */
+static void scan_cb(lv_event_t *e){ (void)e; ui_invalidate_play_scope(); scanview_open(); }
+/* Working mode: the audio-source picker (Local / USB DAC / BT receive / USB storage). */
+static void mode_cb(lv_event_t *e){ (void)e; modes_open(); }
+
 /* A transport glyph button seated INSIDE the card (parent = card). Returns the glyph label. */
 static lv_obj_t *tp_btn(lv_obj_t *card, const char *sym, const lv_font_t *font, int x, int sz, void *cmd){
     lv_obj_t *b = lv_button_create(card);
@@ -70,41 +89,46 @@ static lv_obj_t *tp_btn(lv_obj_t *card, const char *sym, const lv_font_t *font, 
 
 /* A labeled shortcut tile: clickable tile + a state circle (glyph inside) + a caption. The decorative
  * children drop CLICKABLE so taps reach the tile. Returns the state circle (recolored on refresh). */
-static lv_obj_t *shortcut_tile(lv_obj_t *root, int x, const char *glyph, const char *label,
+static lv_obj_t *shortcut_tile(lv_obj_t *root, int x, int y, int w,
+                               const char *glyph, const char *label,
                                lv_event_cb_t short_cb, lv_event_cb_t long_cb, lv_color_t dot_color){
     lv_obj_t *tile = lv_button_create(root);
     lv_obj_remove_style_all(tile);
-    lv_obj_set_size(tile, 84, 76);
-    lv_obj_align(tile, LV_ALIGN_TOP_MID, x, 232);
-    lv_obj_set_style_radius(tile, 20, 0);
+    lv_obj_set_size(tile, w, 58);
+    lv_obj_align(tile, LV_ALIGN_TOP_MID, x, y);
+    lv_obj_set_style_radius(tile, 16, 0);
     lv_obj_set_style_bg_color(tile, qs_card(), 0);
     lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(tile, qs_press(), LV_STATE_PRESSED);
-    /* SHORT_CLICKED (not CLICKED) so a long press fires ONLY long_cb, never the toggle too */
+    lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
+    /* SHORT_CLICKED (not CLICKED) so a long press fires ONLY long_cb, never the primary action too */
     lv_obj_add_event_cb(tile, short_cb, LV_EVENT_SHORT_CLICKED, NULL);
     if(long_cb) lv_obj_add_event_cb(tile, long_cb, LV_EVENT_LONG_PRESSED, NULL);
 
     lv_obj_t *dot = lv_obj_create(tile);
     lv_obj_remove_style_all(dot);
     lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(dot, 40, 40);
-    lv_obj_align(dot, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_set_size(dot, 30, 30);
+    lv_obj_align(dot, LV_ALIGN_TOP_MID, 0, 5);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(dot, dot_color, 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
     lv_obj_t *g = lv_label_create(dot);
     lv_obj_clear_flag(g, LV_OBJ_FLAG_CLICKABLE);
     lv_label_set_text(g, glyph);
-    lv_obj_set_style_text_font(g, th_font(20), 0);
+    lv_obj_set_style_text_font(g, th_font(16), 0);
     lv_obj_set_style_text_color(g, th_text(), 0);
     lv_obj_center(g);
 
     lv_obj_t *lb = lv_label_create(tile);
     lv_obj_clear_flag(lb, LV_OBJ_FLAG_CLICKABLE);
     lv_label_set_text(lb, label);
-    lv_obj_set_style_text_font(lb, th_font(14), 0);
+    lv_label_set_long_mode(lb, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(lb, w - 4);
+    lv_obj_set_style_text_align(lb, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(lb, th_font(12), 0);
     lv_obj_set_style_text_color(lb, qs_txt2(), 0);
-    lv_obj_align(lb, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_align(lb, LV_ALIGN_BOTTOM_MID, 0, -4);
     return dot;
 }
 
@@ -125,9 +149,9 @@ void quicksettings_create(lv_obj_t *root)
 
     /* brightness capsule - knobless: the white fill IS the control */
     g_bright = lv_slider_create(root);
-    lv_obj_set_size(g_bright, 248, 48);
+    lv_obj_set_size(g_bright, 236, 44);
     lv_obj_set_ext_click_area(g_bright, 6);
-    lv_obj_align(g_bright, LV_ALIGN_TOP_MID, 0, 64);
+    lv_obj_align(g_bright, LV_ALIGN_TOP_MID, 0, 56);   /* chord at y=56 is ~261px: 236 clears it */
     lv_slider_set_range(g_bright, 4, 40);   /* match Settings' brightness range */
     lv_slider_set_value(g_bright, ui_get_brightness(), LV_ANIM_OFF);
     lv_obj_set_style_bg_color(g_bright, qs_track(), LV_PART_MAIN);
@@ -150,21 +174,34 @@ void quicksettings_create(lv_obj_t *root)
     lv_obj_t *tcard = lv_obj_create(root);
     lv_obj_remove_style_all(tcard);
     lv_obj_clear_flag(tcard, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(tcard, 280, 88);
-    lv_obj_align(tcard, LV_ALIGN_TOP_MID, 0, 128);
+    lv_obj_set_size(tcard, 280, 68);
+    lv_obj_align(tcard, LV_ALIGN_TOP_MID, 0, 108);
     lv_obj_set_style_radius(tcard, 28, 0);
     lv_obj_set_style_bg_color(tcard, qs_card(), 0);
     lv_obj_set_style_bg_opa(tcard, LV_OPA_COVER, 0);
-    tp_btn(tcard, LV_SYMBOL_PREV, th_font(24), -86, 56, (void *)"0201000C0002");
-    g_pp_glyph = tp_btn(tcard, LV_SYMBOL_PAUSE, th_font(28), 0, 64, (void *)"0201000C0000");
-    tp_btn(tcard, LV_SYMBOL_NEXT, th_font(24), 86, 56, (void *)"0201000C0001");
+    tp_btn(tcard, LV_SYMBOL_PREV, th_font(22), -86, 48, (void *)"0201000C0002");
+    g_pp_glyph = tp_btn(tcard, LV_SYMBOL_PAUSE, th_font(26), 0, 56, (void *)"0201000C0000");
+    tp_btn(tcard, LV_SYMBOL_NEXT, th_font(22), 86, 48, (void *)"0201000C0001");
 
-    /* labeled shortcut tiles (state circle blue when on). EYE_CLOSE = honest sleep-to-saver glyph. */
-    g_wifi_dot = shortcut_tile(root, -94, LV_SYMBOL_WIFI,      "Wi-Fi",     wifi_short_cb, wifi_long_cb,
+    /* ---- shortcut tiles ------------------------------------------------------
+     * Row 1 (y=182..240): four 66px tiles = 4*66 + 3*6 = 282px. The chord at the row's
+     * lowest edge (y=240) is ~343px, so it fits comfortably.
+     * Row 2 (y=246..304): three 76px tiles = 3*76 + 2*8 = 244px. The chord at y=304 is
+     * only ~262px, which is why this row carries three wider tiles rather than four.
+     * Radios and state-bearing toggles go on top; music ACTIONS below. */
+    g_wifi_dot = shortcut_tile(root, -108, 182, 66, LV_SYMBOL_WIFI,      "Wi-Fi",
+                               wifi_short_cb, wifi_long_cb,
                                cfg_get_int("wifi_on", 1) ? lv_color_hex(QS_ON) : qs_off());
-    g_bt_dot   = shortcut_tile(root,    0, LV_SYMBOL_BLUETOOTH, "Bluetooth", bt_short_cb,   bt_long_cb,
+    g_bt_dot   = shortcut_tile(root,  -36, 182, 66, LV_SYMBOL_BLUETOOTH, "Bluetooth",
+                               bt_short_cb, bt_long_cb,
                                cfg_get_int("bt_on", 0) ? lv_color_hex(QS_ON) : qs_off());
-    shortcut_tile(root,  94, LV_SYMBOL_EYE_CLOSE, "Sleep", sleep_cb, NULL, qs_off());
+    shortcut_tile(root,   36, 182, 66, LV_SYMBOL_HOME,      "Home",  home_cb,  NULL, qs_off());
+    /* EYE_CLOSE = honest sleep-to-saver glyph (the screen sleeps; the device stays on). */
+    shortcut_tile(root,  108, 182, 66, LV_SYMBOL_EYE_CLOSE, "Sleep", sleep_cb, NULL, qs_off());
+
+    shortcut_tile(root,  -84, 246, 76, LV_SYMBOL_SETTINGS, "EQ",   eq_cb,   eq_long_cb, qs_off());
+    shortcut_tile(root,    0, 246, 76, LV_SYMBOL_REFRESH,  "Scan", scan_cb, NULL,       qs_off());
+    shortcut_tile(root,   84, 246, 76, LV_SYMBOL_USB,      "Mode", mode_cb, NULL,       qs_off());
 }
 
 /* called from main.c on state change + when the panel opens */

@@ -4,11 +4,13 @@
 #include "config.h"
 #include "anim.h"
 #include "musicdb.h"
+#include "sysconfig.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>   /* system() for the stock-UI switch */
 #include <errno.h>
+#include <unistd.h>   /* readlink/execv/sync: the UI re-exec that applies theme + font */
 
 /* ---- setting model ------------------------------------------------------ */
 typedef enum { ST_TOGGLE, ST_SLIDER, ST_CYCLER, ST_READONLY, ST_ACTION } st_type_t;
@@ -42,6 +44,87 @@ void ui_set_gapless(int on);
 void ui_set_memory(int mode);
 void ui_set_maxvol(int v);
 void ui_set_balance(int v);
+
+/* ---- UI restart -----------------------------------------------------------
+ * Theme and font are read once, at create time, by every screen in the tree
+ * (screens are built once at startup and kept). Re-skinning a live tree would
+ * mean tearing down and rebuilding every screen while timers, animations and
+ * other modules still hold pointers into it - a lot of ways to leave a dangling
+ * reference for a cosmetic change.
+ *
+ * Re-exec'ing ourselves is the honest alternative: it is the ONE restart that is
+ * documented as safe on this device (restart mq_ui, never mq_player - killing the
+ * player releases the SD card and the controller hard-reboots the Disc). Same
+ * pid, so anything supervising us is undisturbed, and the music does not even
+ * pause. It costs the boot animation, about two seconds. */
+static void ui_restart_now(lv_timer_t *t)
+{
+    if(t) lv_timer_del(t);
+    cfg_flush();                       /* the pending setting must survive the exec */
+    sync();
+    char self[512];
+    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+    if(n > 0){
+        self[n] = 0;
+        char *av[] = { self, NULL };
+        execv(self, av);
+    }
+    ui_toast("Couldn't restart the UI");   /* exec failed: stay up, setting applies at next boot */
+}
+/* Give the toast a moment to be seen, then restart. */
+static void ui_restart_soon(const char *why)
+{
+    ui_toast(why);
+    lv_timer_t *t = lv_timer_create(ui_restart_now, 900, NULL);
+    lv_timer_set_repeat_count(t, 1);
+}
+
+static void apply_theme(int v){
+    theme_set(v);
+    ui_restart_soon(v == THEME_LIGHT ? "Switching to Lightâ¦" : "Switching to Darkâ¦");
+}
+static void apply_font_scale(int idx){
+    cfg_set_int("font_scale", idx - 2);   /* cycler index 0..4 -> -2..+2 steps */
+    ui_restart_soon("Applying text sizeâ¦");
+}
+static void apply_font_face(int v){ (void)v; fontpick_open(); }
+
+/* ---- charging optimisation ------------------------------------------------
+ * The stock "charging optimization" (stop around 80-85% to spare the cell) is the
+ * CHARGE_PROTECT column of the stock SYSCONFIG row. With diskOS installed there
+ * was no way to see or change it without booting the stock UI - the setting stayed
+ * stuck at whatever it was, which is what the beta review hit.
+ *
+ * diskOS does not own that column: mq_player rewrites SYSCONFIG from its own
+ * in-memory state when it shuts down, so a one-off write can be undone. We
+ * therefore keep the user's INTENT in diskos.conf and re-assert it into SYSCONFIG
+ * at every boot - the same self-healing pattern main.c already uses for WORK_MODE.
+ *
+ * The charger itself is driven by mq_player/MCU, which reads this at startup, so
+ * the change takes effect from the next restart. We say so rather than implying
+ * it applied immediately. */
+static void apply_charge_protect(int v){
+    if(!sysconfig_set_int("CHARGE_PROTECT", v ? 1 : 0)){
+        ui_toast("Charge setting unavailable");
+        return;
+    }
+    ui_toast(v ? "Charge limit on from next restart" : "Charge limit off from next restart");
+}
+/* Boot: push the stored intent back into SYSCONFIG in case the player overwrote it. */
+void settings_reassert_charge_protect(void){
+    int want = cfg_get_int("charge_protect", -1);
+    if(want < 0) return;                    /* never set by the user -> leave the stock value alone */
+    int have = 0;
+    if(sysconfig_get_int("CHARGE_PROTECT", &have) && have == (want ? 1 : 0)) return;
+    sysconfig_set_int("CHARGE_PROTECT", want ? 1 : 0);
+}
+/* Seed the cycler from the DB the first time, so it shows what the device is
+ * ACTUALLY doing rather than a diskOS default that may contradict it. */
+void settings_seed_charge_protect(void){
+    if(cfg_get_int("charge_protect", -1) >= 0) return;
+    int have = 0;
+    if(sysconfig_get_int("CHARGE_PROTECT", &have)) cfg_set_int("charge_protect", have ? 1 : 0);
+}
 
 static void apply_open_colorpick(int v){ (void)v; colorpick_open(); }   /* seed sliders from cfg + open */
 static void apply_debug_mode(int v){ (void)v; debug_open(); }           /* Settings -> System -> Debug Mode */
@@ -174,6 +257,13 @@ void ui_backlight(int v){
 }
 static void apply_brightness(int v){ if(v < 1) v = 1; ui_backlight(v); }
 void settings_apply_startup(void){
+    /* Text Size is stored twice on purpose: font_scale (-2..+2) is what theme.c reads
+     * at startup, before any screen exists; font_size_idx (0..4) is what the cycler
+     * shows. Re-derive the index from the scale so the row can never disagree with
+     * the font actually in use (e.g. after a config edit or a partial write). */
+    cfg_set_int("font_size_idx", theme_font_scale() + 2);
+    settings_seed_charge_protect();      /* show what the device is really doing */
+    settings_reassert_charge_protect();  /* the player may have overwritten our intent */
     apply_brightness(cfg_get_int("brightness", 16));
     cfg_set_int("sleep_idx", 0);   /* never auto-arm a sleep timer across reboots */
     apply_boot_default(cfg_get_int("boot_default", 0));  /* keep the boot-hook flag in sync */
@@ -200,6 +290,20 @@ static const char *const OPT_POWER[] = { "Off","30 sec","1 min","2 min","5 min" 
 static const char *const OPT_NPSTYLE[] = { "Cover", "Vinyl" };
 static const char *const OPT_SAVERSTYLE[] = { "Cover", "Analog", "Minimal", "Digital", "Vinyl" };
 static const char *const OPT_BOOTDEF[] = { "diskOS", "Stock" };
+static const char *const OPT_THEME[]   = { "Dark", "Light" };
+static const char *const OPT_TEXTSIZE[]= { "Smallest", "Small", "Default", "Large", "Largest" };
+static const char *const OPT_ONOFF[]   = { "Off", "On" };
+static const char *const OPT_USBCONN[] = { "Ask", "Keep Playing", "USB Storage", "USB DAC" };
+static const char *const D_THEME[] = {
+    "Near-black surfaces. Best indoors and at night, and easiest on the battery.",
+    "High-luminance surfaces for bright daylight, where the dark theme is hard to read outdoors.",
+};
+static const char *const D_USBCONN[] = {
+    "Ask what to do each time the Disc is plugged into a computer.",
+    "Stay in Local Playback and keep playing - the computer just charges.",
+    "Open the card on the computer (the Disc stops playing while it is connected).",
+    "Act as a USB sound card for the computer.",
+};
 static const char *const OPT_ARTCACHE[] = { "Off","When Idle","Idle & Charging" };
 /* audio cluster cyclers - all use min=-1 so the value can be "System default" (unmanaged) */
 static const char *const OPT_DRE[]    = { "Off", "On" };
@@ -258,8 +362,14 @@ static const setting_t TABLE[] = {
     /* SPDIF removed: raw 0666 output-route switch wedges the player mid-playback (tears down
      * the local player, g_fiio_local null). Needs the stock stop->switch->resume sequence,
      * not a raw command - revisit if that sequence is decoded. */
+    { "Display",  "Theme",       ST_CYCLER, "theme", 0,0,0, OPT_THEME, 2, NULL, apply_theme, THEME_DARK,
+      "Light or dark surfaces. The UI restarts to apply; your music keeps playing.", D_THEME },
     { "Display",  "Brightness",  ST_SLIDER, "brightness", 4,40,2, NULL,0, NULL, apply_brightness, 16,
       "Screen backlight level.", NULL },
+    { "Display",  "Font",        ST_ACTION, NULL, 0,0,0, NULL,0, "@font", apply_font_face, 0,
+      "Use a .ttf or .otf font from the SD card instead of the built-in one. Put fonts in a Fonts folder on the card.", NULL },
+    { "Display",  "Text Size",   ST_CYCLER, "font_size_idx", 0,0,0, OPT_TEXTSIZE, 5, NULL, apply_font_scale, 2,
+      "Scale every label in the UI up or down together. The UI restarts to apply.", NULL },
     { "Display",  "Now Playing", ST_CYCLER, "np_style",   0,0,0, OPT_NPSTYLE, 2, NULL, apply_np_style, 0,
       "Album art style on the Now Playing screen.", D_NPSTYLE },
     { "Display",  "Accent Colour", ST_ACTION, NULL, 0,0,0, NULL,0, LV_SYMBOL_RIGHT, apply_open_colorpick, 0,
@@ -286,6 +396,10 @@ static const setting_t TABLE[] = {
       "Pair Bluetooth devices. Audio still plays from the device (BT audio not yet enabled).", NULL },
     { "System",   "Sleep Timer", ST_CYCLER, "sleep_idx", 0,0,0, OPT_SLEEP, 6, NULL, apply_sleep, 0,
       "Pause playback after this long. Resets on restart.", NULL },
+    { "System",   "Charge Limit", ST_CYCLER, "charge_protect", 0,0,0, OPT_ONOFF, 2, NULL, apply_charge_protect, 0,
+      "Stop charging around 80-85% to extend battery life. This is the stock firmware's charging optimisation; it takes effect from the next restart.", NULL },
+    { "System",   "On USB Connect", ST_CYCLER, "usb_connect", 0,0,0, OPT_USBCONN, 4, NULL, NULL, 0,
+      "What happens when the Disc is plugged into a computer. The player defaults to opening the card as storage; this decides whether diskOS lets it.", D_USBCONN },
     { "System",   "Rescan Library", ST_ACTION, NULL, 0,0,0, NULL,0, "Scan", apply_rescan, 0,
       "Re-scan the SD card for new or removed music. Shows live progress; you can leave the screen and it keeps going.", NULL },
     { "System",   "Import Playlists", ST_ACTION, NULL, 0,0,0, NULL,0, "Import", apply_import_m3u, 0,
@@ -334,7 +448,10 @@ static void val_text(const setting_t *s, char *buf, int n){
             if(s->ro_val && !strcmp(s->ro_val, "@temp")) read_batt_temp(buf, n);
             else snprintf(buf,n, "%s", s->ro_val?s->ro_val:"");
             break;
-        case ST_ACTION:   snprintf(buf,n, "%s", s->ro_val?s->ro_val:""); break;
+        case ST_ACTION:
+            if(s->ro_val && !strcmp(s->ro_val, "@font")) snprintf(buf,n, "%s", theme_font_name());
+            else snprintf(buf,n, "%s", s->ro_val?s->ro_val:"");
+            break;
     }
 }
 

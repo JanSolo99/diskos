@@ -142,9 +142,14 @@ int theme_font_list(char names[][64], int cap)
         struct dirent *e;
         while(n < cap && (e = readdir(d))){
             if(e->d_name[0] == '.' || !is_font_file(e->d_name)) continue;
+            /* Skip a name that would not fit rather than storing a truncated one: the
+             * truncated form is what gets persisted and later resolved, and it would
+             * never match a real file - so the font would silently revert to built-in
+             * with nothing to explain why. */
+            if(strlen(e->d_name) >= 64) continue;
             int dup = 0;   /* the same filename in two dirs is one entry */
             for(int k = 0; k < n; k++) if(!strcasecmp(names[k], e->d_name)){ dup = 1; break; }
-            if(!dup) snprintf(names[n++], 64, "%s", e->d_name);
+            if(!dup){ memcpy(names[n], e->d_name, strlen(e->d_name) + 1); n++; }
         }
         closedir(d);
     }
@@ -196,6 +201,12 @@ const lv_font_t *th_font(int size)
         for(int i = 0; i < g_ttf_n; i++) if(g_ttf[i].size == s) return g_ttf[i].f ? g_ttf[i].f : builtin_for(s);
         if(g_ttf_n < (int)(sizeof(g_ttf)/sizeof(g_ttf[0]))){
             lv_font_t *f = lv_tiny_ttf_create_file(g_font_file, s);
+            /* Chain the built-in face behind the custom one. The UI's icons are
+             * LV_SYMBOL_* private-use codepoints that live in Montserrat, and almost
+             * no user font carries them - without this fallback, choosing a custom
+             * font would replace every play/wifi/battery glyph in the interface with
+             * a tofu box. The fallback also covers any Latin glyph the face lacks. */
+            if(f) f->fallback = builtin_for(s);
             g_ttf[g_ttf_n].size = s;
             g_ttf[g_ttf_n].f    = f;     /* NULL is cached too: a bad TTF must not be
                                           * re-parsed on every label we draw */

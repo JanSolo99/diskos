@@ -436,7 +436,32 @@ int ui_route_analog(void){
  * (coldplug_should_run / coldplug_thread). A plain int here is a C11 data race; the atomic makes the
  * load/store well-defined (seq_cst) without a mutex for this single word. */
 static _Atomic int g_source_mode = 0;
+static _Atomic uint32_t g_source_switch_at;   /* tick of our last explicit switch (see below) */
 int ui_get_source_mode(void){ return g_source_mode; }
+
+/* What the device is ACTUALLY doing, as opposed to what we last asked for.
+ *
+ * g_source_mode is only a mirror of our own commands, and mq_player can enter USB
+ * storage on its own the moment a computer is plugged in - without going through
+ * ui_set_source_mode(). That is what makes the Working Mode screen show a tick
+ * beside "Local Playback" while nothing will play, and why re-tapping Local
+ * "forces" it: the tick was reporting our intent, not the truth.
+ *
+ * The gadget state is authoritative, so consult it - but only once our own last
+ * switch has had time to land. Tearing the storage gadget down is asynchronous, so
+ * for a few seconds after switching to Local the card is still exported and a naive
+ * read would report Storage, flicker the tick back, and re-trigger the USB watcher
+ * below in a loop. */
+static int sd_exported_to_host(void);   /* defined with the coldplug code below */
+#define SOURCE_SETTLE_MS 6000
+int ui_source_mode_effective(void)
+{
+    int mine = g_source_mode;
+    uint32_t at = atomic_load(&g_source_switch_at);
+    if(at && lv_tick_elaps(at) < SOURCE_SETTLE_MS) return mine;   /* our switch is still settling */
+    if(mine == 0 && sd_exported_to_host()) return 3;              /* the player exported the card itself */
+    return mine;
+}
 
 /* Serialises the coldplug worker's "check Local + emit SD add" against ui_set_source_mode's "publish
  * mode + queue the gadget export". A plain flag cannot close the check->emit TOCTOU (the worker can
@@ -482,8 +507,50 @@ int ui_set_source_mode(int mode){
     if(mode == 0 && was_playing) ipc_send_cmd("0201000C0000");   /* only Local resumes playback */
     /* g_source_mode was already published above (before the gadget commands) for coldplug safety. */
     pthread_mutex_unlock(&g_sd_mode_mu);
+    atomic_store(&g_source_switch_at, lv_tick_get());   /* settle window for ui_source_mode_effective */
     fprintf(stderr,"source mode -> %d (was_playing=%d)\n", mode, was_playing); fflush(stderr);
     return 0;
+}
+
+/* ---- what happens when a computer is plugged in ---------------------------
+ * mq_player opens the card as USB storage on its own as soon as a host enumerates
+ * it, whatever the Disc was doing - so plugging in to charge stops the music and
+ * hands the card away. "On USB Connect" (Settings -> System) decides what diskOS
+ * does about that:
+ *   0 Ask           - a prompt, so a charge-only cable doesn't silently stop playback
+ *   1 Keep Playing  - put us straight back into Local Playback
+ *   2 USB Storage   - the stock behaviour; leave it alone
+ *   3 USB DAC       - switch to the sound-card gadget instead
+ *
+ * We act on the EDGE into an unrequested export only, so the user can still pick
+ * Storage by hand from the Working Mode screen and have it stick, and unplugging
+ * re-arms it for the next connection. */
+static void usb_connect_watch(lv_timer_t *t)
+{
+    (void)t;
+    static int armed = 1;                 /* 1 = not currently in an unrequested export */
+    int exported = (g_source_mode == 0) && sd_exported_to_host();
+    uint32_t at = atomic_load(&g_source_switch_at);
+    if(at && lv_tick_elaps(at) < SOURCE_SETTLE_MS) return;   /* our own switch still settling */
+
+    if(!exported){ armed = 1; return; }   /* unplugged / back to local: re-arm */
+    if(!armed) return;                    /* already handled this connection */
+    armed = 0;
+
+    switch(cfg_get_int("usb_connect", 0)){
+        case 1:                                            /* Keep Playing */
+            if(ui_set_source_mode(0) == 0) ui_toast("Charging \xE2\x80\x93 still playing");
+            break;
+        case 3:                                            /* USB DAC */
+            if(ui_set_source_mode(1) == 0) ui_toast("USB DAC");
+            break;
+        case 2:                                            /* Storage: the stock behaviour */
+            ui_toast("Card open on the computer");
+            break;
+        default:                                           /* Ask */
+            usbprompt_show();
+            break;
+    }
 }
 
 /* Re-send every MANAGED audio setting (cfg value >= 0). Called once the player is confirmed
@@ -1373,6 +1440,7 @@ int main(int argc, char **argv){
     lastfm_init();                                        /* load Last.fm config + offline queue */
     lv_timer_create(lastfm_tick, 1000, NULL);            /* watch play-state + drive scrobbles */
     lv_timer_create(scanner_poll, 500, NULL);            /* apply a finished library rescan */
+    lv_timer_create(usb_connect_watch, 1000, NULL);      /* act on an unrequested USB-storage export */
     if(mdb_song_count()==0 && !mdb_load_failed()) scanner_start();   /* first run / GENUINELY empty DB -> auto-scan
                                                                      * the SD; skip on a transient DB load error so
                                                                      * we don't rebuild the library needlessly */

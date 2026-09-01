@@ -7,9 +7,18 @@
 #include <string.h>
 #include <dirent.h>
 
-/* Homebrew app launcher. Lists /usr/data/apps/<name>/ entries; each may carry an
- * app.conf ("name=...", "exec=..."), else defaults to dir name + .../app. Tapping
- * a row asks main.c to fork/exec it (app owns fb0 + touch while running). */
+/* The Home MENU (swipe left from Home) - the "proper accessible home screen menu
+ * rather than putting everything in the settings page" the beta review asked for.
+ *
+ * It is a scrolling 2-wide tile grid holding the places you actually go: the
+ * library and search, the things that used to be buried several rows down a
+ * thirty-row settings scroll (Working Mode, Equalizer, Rescan), the built-in apps,
+ * any homebrew app, and Settings itself.
+ *
+ * Homebrew apps come from /usr/data/apps/<name>/; each may carry an app.conf
+ * ("name=...", "exec=..."), else it defaults to the directory name + .../app.
+ * Tapping one asks main.c to fork/exec it (the app owns fb0 + touch while it
+ * runs). Built-in destinations are plain screen_show()s. */
 
 #define APPS_DIR "/usr/data/apps"
 #define MAX_APPS 24
@@ -56,6 +65,16 @@ static void app_row_cb(lv_event_t *e){
 }
 static void lastfm_row_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) lastfm_open(); }
 static void settings_row_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) screen_show(SCR_SETTINGS); }
+static void nav_row_cb(lv_event_t *e){
+    if(lv_event_get_code(e)==LV_EVENT_CLICKED) screen_show((int)(uintptr_t)lv_event_get_user_data(e));
+}
+static void weather_row_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) weather_app_open(); }
+static void mode_row_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) modes_open(); }
+static void scan_row_cb(lv_event_t *e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
+    ui_invalidate_play_scope();
+    scanview_open();
+}
 
 /* one app tile in the 2-wide grid (g_list is ROW_WRAP): a big glyph over a small caption */
 static void make_tile(const char *icon, const lv_font_t *ifont, const char *name, lv_event_cb_t cb, void *ud){
@@ -85,7 +104,20 @@ void apps_reload(void){
     if(!g_list) return;
     lv_obj_clean(g_list);
     scan_apps();
-    /* Weather is not a tile here anymore - it opens by tapping the home weather glance (glance->detail). */
+
+    /* Order is by how often you reach for it, not by category: browsing first, then
+     * the controls that were buried in Settings, then apps, then Settings itself.
+     * Symbol glyphs render from the built-in font (icons live in Montserrat's
+     * private-use range, which a custom UI font does not carry - theme.c chains the
+     * built-in face behind a custom one so these keep working either way). */
+    make_tile(LV_SYMBOL_DIRECTORY, th_font(28), "Library",  nav_row_cb, (void*)(uintptr_t)SCR_LIBRARY);
+    make_tile(LV_SYMBOL_LIST,      th_font(28), "Search",   nav_row_cb, (void*)(uintptr_t)SCR_SEARCH);
+    make_tile(LV_SYMBOL_AUDIO,     th_font(28), "Playing",  nav_row_cb, (void*)(uintptr_t)SCR_NOWPLAYING);
+    /* Working Mode + Equalizer + Rescan were all several screens deep in Settings. */
+    make_tile(LV_SYMBOL_USB,       th_font(28), "Mode",     mode_row_cb, NULL);
+    make_tile(LV_SYMBOL_SETTINGS,  th_font(28), "EQ",       nav_row_cb, (void*)(uintptr_t)SCR_EQ);
+    make_tile(LV_SYMBOL_REFRESH,   th_font(28), "Scan",     scan_row_cb, NULL);
+    make_tile(LV_SYMBOL_EYE_OPEN,  th_font(28), "Weather",  weather_row_cb, NULL);
     /* built-in: Last.fm scrobbling (the FA lastfm brand glyph) */
     make_tile(LFM_ICON, &font_icons_28, "Last.fm", lastfm_row_cb, NULL);
     /* homebrew apps from /usr/data/apps */
@@ -98,7 +130,7 @@ void apps_create(lv_obj_t *root){
     lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
-    ui_header(root, "Apps");   /* shared standard header */
+    ui_header(root, "Menu");   /* shared standard header */
 
     g_list = lv_obj_create(root);
     lv_obj_remove_style_all(g_list);

@@ -6,7 +6,7 @@
 #include "ipc.h"
 #include "theme.h"   /* palette + font tokens: every screen paints from these */
 #include <stdbool.h>
-enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTINGS_GROUP, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_SCAN, SCR_COUNT };
+enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTINGS_GROUP, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_SCAN, SCR_FONTPICK, SCR_COUNT };
 void screens_init(void);
 void screen_show(int which);
 void screen_back(void);
@@ -40,6 +40,11 @@ void modes_open(void);                     /* refresh selection + show SCR_WORKM
 /* source/working mode: 0=Local 1=USB-DAC 2=BT-Receiving 3=USB-Storage */
 int  ui_set_source_mode(int mode);         /* replay the stock V2.28 switch sequence; 0=ok -1=bad arg */
 int  ui_get_source_mode(void);
+/* What the device is ACTUALLY doing (consults the USB gadget), vs. what we last
+ * asked for. Use this for anything the user sees; ui_get_source_mode() is only our
+ * own request mirror. */
+int  ui_source_mode_effective(void);
+void usbprompt_show(void);   /* "plugged into a computer" prompt (modes.c) */
 void npmenu_set(const track_state_t *st, int playing, const void *thumb_src);
 void npmenu_close_transients(void);   /* dismiss lv_layer_top popups on navigation */
 void ui_set_favorite(int on);   /* love/unlove the current song (0104) */
@@ -86,6 +91,11 @@ void scanview_create(lv_obj_t *root);
 void scanview_open(void);            /* start a scan if idle, then show SCR_SCAN */
 void scanview_set_visible(int on);   /* screen manager: poll only while it is on screen */
 void settings_apply_startup(void);
+void settings_reassert_charge_protect(void);  /* boot: push the stored intent back into SYSCONFIG */
+void settings_seed_charge_protect(void);      /* first run: adopt the device's current value */
+/* font picker (fontpick.c) */
+void fontpick_create(lv_obj_t *root);
+void fontpick_open(void);
 
 /* accent plumbing: the live accent + per-screen repaint so no surface shows a stale colour */
 lv_color_t ui_current_accent(void);
