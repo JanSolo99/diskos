@@ -215,6 +215,10 @@ leave the device mask-ROM-recoverable instead of continuing. Wide field testing 
   appears empty, reinsert the card once.
 - **Lightly tested modes:** USB DAC, Bluetooth receiver, and USB storage have less coverage than
   local playback.
+- **Charge limit:** the toggle writes the stock firmware's own `CHARGE_PROTECT` setting, which
+  mq_player reads at startup, so it takes effect from the next restart rather than immediately.
+- **Tag coverage:** WAV, AIFF, DFF and WMA are indexed but have no tag parser yet, so they show
+  their filename as the title. Every other supported container reads real tags.
 - **USB-serial debug:** the dev variant's CDC-ACM serial shell can be unreliable. Prefer temporary
   SSH over Wi-Fi.
 - **Last.fm:** scrobbling is experimental and has not completed a live end-to-end verification.

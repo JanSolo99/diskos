@@ -112,6 +112,10 @@ int  saver_wants_bright(void);/* 1 = keep full brightness (vinyl art showcase), 
 /* Suspend the UI liveness watchdog around an operation that deliberately blocks the
  * LVGL thread (launching an app, a long SD walk). Always pair on/off. */
 void ui_watchdog_pause(int on);
+/* Re-exec mq_ui in place (same pid; mq_player and the music are untouched). Used to
+ * apply settings that every screen reads once at build time. Returns only on failure.
+ * flush_config=1 persists pending config first. */
+void ui_restart_self(int flush_config);
 int  ui_run_bounded(char *const argv[], int timeout_ms);  /* external cmd as a killable child w/ hard timeout */
 void tune_refresh(void);      /* re-sync Tune panel Play Mode/EQ labels on show */
 

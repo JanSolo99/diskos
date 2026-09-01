@@ -60,16 +60,8 @@ void ui_set_balance(int v);
 static void ui_restart_now(lv_timer_t *t)
 {
     if(t) lv_timer_del(t);
-    cfg_flush();                       /* the pending setting must survive the exec */
-    sync();
-    char self[512];
-    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
-    if(n > 0){
-        self[n] = 0;
-        char *av[] = { self, NULL };
-        execv(self, av);
-    }
-    ui_toast("Couldn't restart the UI");   /* exec failed: stay up, setting applies at next boot */
+    ui_restart_self(1);                    /* flushes config first; returns only on failure */
+    ui_toast("Couldn't restart the UI");   /* stay up: the setting applies at the next boot */
 }
 /* Give the toast a moment to be seen, then restart. */
 static void ui_restart_soon(const char *why)

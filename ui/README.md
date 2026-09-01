@@ -25,12 +25,34 @@ Built with **LVGL 9.2.2** (software renderer) on a static-musl mipsel toolchain.
 | Area | Files |
 |---|---|
 | Core / loop / nav | `main.c`, `screenmgr.c` / `screens.h`, `fb_pan.c`, `ipc.c` / `ipc.h`, `config.c` |
+| Look & feel | `theme.c` / `theme.h` (palette + font tokens), `fontpick.c`, `anim.c` |
 | Now Playing + art | `ui.c` / `ui.h`, `art.c` / `art.h`, `artcache.c`, `saver.c`, `songinfo.c`, `npmenus.c` |
-| Library / browse | `home.c`, `library.c`, `musicdb.c`, `search.c`, `playlistview.c`, `scanner.c` |
-| Settings / features | `settings.c`, `eqcustom.c`, `quicksettings.c`, `modes.c`, `kbinput.c`, `colorpick.c`, `toast.c`, `apps.c`, `debug_ui.c`, `fwcaps.c` |
+| Library / browse | `home.c`, `library.c`, `musicdb.c`, `search.c`, `playlistview.c`, `scanner.c`, `scanview.c` |
+| Settings / features | `settings.c`, `sysconfig.c` (stock SYSCONFIG access), `eqcustom.c`, `quicksettings.c`, `modes.c`, `kbinput.c`, `colorpick.c`, `toast.c`, `apps.c`, `debug_ui.c`, `fwcaps.c` |
 | Connectivity | `wifi.c`, `bt.c`, `weather.c`, `lyrics.c`, `lastfm.c` / `lastfm_ui.c` |
 | Bundled third-party | `sqlite3.c` (public domain), `jsmn.h` (MIT), `md5.c` (public domain), `font_*.c` (generated glyph data) |
 | Dev/diagnostic tools | `fbshot.c`, and other small on-device helpers (not part of the shipped UI) |
+
+## Theming and fonts
+
+Every surface colour and every typeface in the UI comes from a token in `theme.c` rather than a
+hard-coded value, so the whole interface can be re-skinned from one place.
+
+- **Palettes.** `th_bg()`, `th_card()`, `th_text()` and friends are named by ROLE, not by colour, so
+  a token means the same thing in both the dark and light palettes. Adding a third palette is a
+  struct literal. Anything that must stay a fixed colour - the Last.fm red, the iOS state blue, the
+  user's accent - deliberately stays a literal.
+- **Fonts.** Call sites use `th_font(size)`, never `&lv_font_montserrat_NN`. That indirection is what
+  lets a user-supplied `.ttf`/`.otf` from the SD card replace the face everywhere, and lets Text Size
+  shift the whole type ladder together instead of flattening it. A custom face is chained in front of
+  the built-in one, so `LV_SYMBOL_*` icons (private-use codepoints that only Montserrat carries)
+  keep rendering.
+- Both are resolved once, when each screen is built, so changing either re-execs `mq_ui`
+  (`ui_restart_self()`). That restarts the UI only - `mq_player`, the music and the SD card are
+  untouched, and the pid is unchanged.
+
+If you add a screen, paint it from the tokens. A hard-coded `lv_color_hex()` will look correct in
+whichever palette you developed against and wrong in the other.
 
 ## Build
 Requires:

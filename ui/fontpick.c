@@ -30,11 +30,7 @@ static int  g_n;
 static void restart_now(lv_timer_t *t)
 {
     if(t) lv_timer_del(t);
-    cfg_flush();
-    sync();
-    char self[512];
-    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
-    if(n > 0){ self[n] = 0; char *av[] = { self, NULL }; execv(self, av); }
+    ui_restart_self(1);
     ui_toast("Couldn't restart the UI");
 }
 

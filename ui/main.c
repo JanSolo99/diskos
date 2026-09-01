@@ -218,6 +218,37 @@ static int btconn_get(void){ return atomic_load(&g_bt_conn); }
  * UI restarts: mq_player keeps the music and the SD card, which is the one thing
  * that must never be interrupted on this device (killing it hard-reboots the Disc).
  * Same PID, so anything supervising us is undisturbed. */
+/* ---- restart the UI in place ----------------------------------------------
+ * Re-exec our own binary. This is the ONE restart that is safe on this device: only
+ * mq_ui goes down, mq_player keeps the music and the SD card (killing the player
+ * releases the card and the Disc's controller hard-reboots). Same pid, so anything
+ * supervising us is undisturbed, and playback does not even pause.
+ *
+ * Used by the theme and font pickers (screens resolve colours and faces once, when
+ * they are built) and by the liveness watchdog below.
+ *
+ * Inherited descriptors are marked close-on-exec rather than closed: if execv fails
+ * we are still alive with a working framebuffer and player queues, whereas closing
+ * first would leave a UI that cannot draw. Without this, every restart would leak
+ * the previous image's fds into the next one, which a watchdog restart loop would
+ * eventually turn into fd exhaustion.
+ *
+ * Returns only on failure. */
+void ui_restart_self(int flush_config)
+{
+    if(flush_config){ cfg_flush(); sync(); }
+    for(int fd = 3; fd < 256; fd++){
+        int fl = fcntl(fd, F_GETFD);
+        if(fl >= 0) fcntl(fd, F_SETFD, fl | FD_CLOEXEC);
+    }
+    char self[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+    if(n <= 0) return;
+    self[n] = 0;
+    char *av[] = { self, NULL };
+    execv(self, av);
+}
+
 #define WATCHDOG_MS 45000
 static _Atomic uint32_t g_heartbeat;
 /* Launching an external app deliberately blocks the LVGL loop for as long as the app
@@ -242,13 +273,9 @@ static void *ui_watchdog(void *arg)
         if(age < WATCHDOG_MS) continue;
         fprintf(stderr, "WATCHDOG: UI thread stalled %ums - restarting mq_ui\n", age);
         fflush(stderr);
-        char self[PATH_MAX];
-        ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
-        if(n > 0){
-            self[n] = 0;
-            char *av[] = { self, NULL };
-            execv(self, av);                        /* same pid; player untouched */
-        }
+        /* No config flush here: this is crash recovery, not a settings change, and the
+         * stuck main thread may be mid-write. Just re-exec. */
+        ui_restart_self(0);
         /* exec failed - keep watching rather than exiting (exiting would leave the
          * user with no UI at all, which is strictly worse than a frozen one). */
         atomic_store(&g_heartbeat, lv_tick_get());

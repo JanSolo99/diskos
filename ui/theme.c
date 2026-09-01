@@ -97,12 +97,22 @@ static const lv_font_t *const BUILTIN[] = {
 static const int BUILTIN_SZ[] = { 8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48 };
 #define N_BUILTIN ((int)(sizeof(BUILTIN)/sizeof(BUILTIN[0])))
 
+/* Where fonts are looked for, in order: a Fonts folder on the card (either case),
+ * then the card root. Overridable at build time so the loader can be exercised
+ * against a fake card off-device. */
+#ifndef FONT_DIR_A
 #define FONT_DIR_A "/tmp/sdcard/Fonts"
+#endif
+#ifndef FONT_DIR_B
 #define FONT_DIR_B "/tmp/sdcard/fonts"
+#endif
+#ifndef FONT_ROOT
 #define FONT_ROOT  "/tmp/sdcard"
+#endif
 
 static int   g_scale;                     /* -2..+2 design-size steps */
-static char  g_font_file[128];            /* absolute path of the loaded TTF, "" = built-in */
+static char  g_font_file[128];            /* POSIX path of the loaded TTF, "" = built-in */
+static char  g_font_lvpath[132];          /* the same file as an LVGL VFS path (see below) */
 static char  g_font_name[64] = "Built-in";
 
 /* Custom faces are instantiated lazily, one lv_tiny_ttf instance per size actually
@@ -169,12 +179,21 @@ void theme_font_init(void)
 #if LV_USE_TINY_TTF
     const char *want = cfg_get_str("font_file", "");
     if(want && want[0] && strcasecmp(want, "Built-in") != 0){
-        if(font_resolve(want, g_font_file, sizeof g_font_file))
+        if(font_resolve(want, g_font_file, sizeof g_font_file)){
             snprintf(g_font_name, sizeof g_font_name, "%s", want);
-        else
+            /* lv_tiny_ttf_create_file() opens through LVGL's virtual filesystem, NOT
+             * through fopen(), so it needs a DRIVE-LETTER path. Handing it the bare
+             * POSIX path makes lv_fs_open() return NOT_EX and every custom font falls
+             * back to the built-in face - silently, with nothing to explain why.
+             * LV_FS_STDIO_LETTER is 'A' (lv_conf.h), matching the "A:/tmp/..." form
+             * the album-art code already uses. */
+            snprintf(g_font_lvpath, sizeof g_font_lvpath, "A:%s", g_font_file);
+        } else {
             /* the card was swapped or the file renamed: fall back silently to the
              * built-in face rather than rendering an empty UI. */
             g_font_file[0] = 0;
+            g_font_lvpath[0] = 0;
+        }
     }
 #endif
 }
@@ -202,7 +221,7 @@ const lv_font_t *th_font(int size)
     if(g_font_file[0]){
         for(int i = 0; i < g_ttf_n; i++) if(g_ttf[i].size == s) return g_ttf[i].f ? g_ttf[i].f : builtin_for(s);
         if(g_ttf_n < (int)(sizeof(g_ttf)/sizeof(g_ttf[0]))){
-            lv_font_t *f = lv_tiny_ttf_create_file(g_font_file, s);
+            lv_font_t *f = lv_tiny_ttf_create_file(g_font_lvpath, s);
             /* Chain the built-in face behind the custom one. The UI's icons are
              * LV_SYMBOL_* private-use codepoints that live in Montserrat, and almost
              * no user font carries them - without this fallback, choosing a custom
