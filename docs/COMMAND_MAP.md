@@ -55,7 +55,7 @@ Working route-to-BT sequence (diskOS, MAC = the connected speaker, uppercased):
 06b3001D0000<MAC>   codec select: 0=SBC (our bluealsa is sbc-only) + MAC payload (stock frame-shape; worker ignores it)
 0715000C<vol>  volume
 ```
-Then play normally (`0100…`). Reverse (BT→local) = `ui_route_analog()`: `0666000C0006` then `0657000C0008`.
+Then play normally (`0100...`). Reverse (BT→local) = `ui_route_analog()`: `0666000C0006` then `0657000C0008`.
 **No-stutter requires bluealsa `--sbc-quality=medium`** (bit-pool ~33): stock default-quality stutters; medium plays clean stereo (~86% CPU idle on device). Set in `bt.c` bt_enable/bt_ensure_services. `--a2dp-force-mono` also works but is NOT needed (stereo is fine at medium quality).
 
 ## Table A @0x7c9d30 - 131 entries (terminator 0x7ca148)

@@ -110,8 +110,8 @@ CS43131 (~384 kHz PCM, DSD256), not the SoC.
 
 ### 4.3 ALSA mixer surface
 `amixer controls` shows only the **SoC internal codec** (`ICODEC HPOUTL/MIC GAIN`,
-`MICBIAS`), digital mic (`DMIC ...`), line-out muxes (`LO0_MUX`…`LO11_MUX`), and the five
-audio-interface formatters (`baic0_fmt`…`baic4_fmt`). There is **no CS43131 control, no
+`MICBIAS`), digital mic (`DMIC ...`), line-out muxes (`LO0_MUX`...`LO11_MUX`), and the five
+audio-interface formatters (`baic0_fmt`...`baic4_fmt`). There is **no CS43131 control, no
 DSD switch, and no digital-filter control in ALSA** - all of that is the kernel driver +
 mq_player ioctl path. `BAIC: baic start/stop` in dmesg marks I²S on/off per track.
 

@@ -91,16 +91,14 @@ involved in the source release.)
 
 - **The Python installer, build scripts, and docs** in this repo are licensed **MIT** -
   `Copyright (c) 2026 diskOS contributors`. See `LICENSE`.
-- **The diskOS UI (`payload/mq_ui`)** ships as a **binary-only** component (static-musl, MIPS): its
-  source is not yet published and it is **not** covered by the MIT license above.
+- **The diskOS UI source** (`ui/`, built to `payload/mq_ui`, static-musl MIPS) is licensed
+  **GPL-3.0-or-later** (`ui/COPYING`, `licenses/GPL-3.0.txt`; © diskOS contributors) - deliberately
+  separate from the MIT tooling above so UI forks stay open. It bundles LVGL (MIT), SQLite (public
+  domain), jsmn (MIT), md5 (public domain), and Montserrat / Source Han Sans / Font Awesome fonts
+  (all OFL-1.1); see `ui/README.md` and `ui/licenses/`.
 
-  **diskOS UI Binary License:** *You may use and redistribute the `mq_ui` binary verbatim - on its own
-  or as part of the diskOS installer - free of charge. It is provided **AS IS, without warranty of any
-  kind**. Its source is not published, and no right to modify, decompile, or reverse-engineer it is
-  granted. The embedded third-party components below retain their own licenses.*  © 2026 the diskOS
-  author (alias **b0hemia**).
-
-  It statically incorporates these third-party components, whose licenses apply to the shipped binary:
+  The built `mq_ui` binary statically incorporates these third-party components, whose licenses
+  apply to the shipped binary (and whose source ships in `ui/` / `ui/lvgl/`):
 
   | Embedded in `mq_ui` | License | Text / source |
   |---|---|---|
@@ -108,7 +106,7 @@ involved in the source release.)
   | **LVGL** (UI toolkit) | MIT | `licenses/MIT-LVGL.txt` |
   | **JSMN** (JSON parser) | MIT | `licenses/MIT-JSMN.txt` |
   | **SQLite** (amalgamation) | Public domain | https://sqlite.org/copyright.html |
-  | **MD5** (Peslyak/Solar Designer) | Public domain | in the (unpublished) UI source |
+  | **MD5** (Peslyak/Solar Designer) | Public domain | `ui/md5.c` |
   | **QR Code generator** (Nayuki `qrcodegen`) | MIT | `licenses/MIT-qrcodegen.txt` |
   | **TJpgDec** (tiny JPEG decoder, via LVGL) | BSD-style (ChaN) | `licenses/LICENSE-TJpgDec.txt` |
   | **Montserrat** font (via LVGL built-in fonts) | SIL OFL 1.1 | `licenses/OFL-1.1-Montserrat.txt` |
@@ -127,8 +125,9 @@ involved in the source release.)
 ### Compliance checklist (done)
 - ✅ Full license texts shipped in [`licenses/`](licenses/) (GPL-2.0, LGPL-2.1, BSD, PSF, LVGL-MIT,
   dropbear, Font Awesome OFL/CC-BY) - see [`licenses/README.md`](licenses/README.md).
-- ✅ diskOS installer license stated: **MIT** (`LICENSE`). The `mq_ui` binary is documented as
-  binary-only (source unpublished, not MIT) with its embedded LVGL/JSMN/Font Awesome notices shipped.
+- ✅ diskOS installer/tooling license: **MIT** (`LICENSE`). The diskOS **UI source** is published
+  under **GPL-3.0-or-later** in `ui/` (`ui/COPYING`, `licenses/GPL-3.0.txt`) with its embedded
+  LVGL/SQLite/jsmn/Font Awesome/Montserrat/Source Han Sans notices shipped.
 - ✅ Exact upstream versions pinned and their **complete corresponding source shipped in-tree** for the
   GPL/LGPL native binaries: squashfs-tools 4.6.1, liblzo2 2.10, libusb-1.0 1.0.27, the SPL, and
   usbboot - in [`corresponding-source/`](corresponding-source/) and [`spl-src/`](spl-src/). Source
