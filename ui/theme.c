@@ -52,11 +52,13 @@ void theme_init(void)
 }
 int  theme_is_light(void){ return g_mode == THEME_LIGHT; }
 int  theme_get(void){ return g_mode; }
+/* PERSIST ONLY - deliberately does not touch the live palette. Screens resolve their
+ * colours when they are built, so flipping g_p here would repaint whatever screen is
+ * in front in the new palette while every other screen stayed in the old one, for the
+ * moment before the UI restarts. The restart is what applies it. */
 void theme_set(int mode)
 {
-    g_mode = (mode == THEME_LIGHT) ? THEME_LIGHT : THEME_DARK;
-    g_p = (g_mode == THEME_LIGHT) ? &P_LIGHT : &P_DARK;
-    cfg_set_int("theme", g_mode);
+    cfg_set_int("theme", (mode == THEME_LIGHT) ? THEME_LIGHT : THEME_DARK);
 }
 
 lv_color_t th_bg(void)         { return lv_color_hex(g_p->bg); }

@@ -72,7 +72,7 @@ static void on_query(const char *text){
     snprintf(g_query, sizeof g_query, "%s", text ? text : "");
     if(g_bar_lbl) lv_label_set_text(g_bar_lbl, g_query[0] ? g_query : "Search songs, artists, albums");
     if(g_bar_lbl) lv_obj_set_style_text_color(g_bar_lbl,
-        lv_color_hex(g_query[0] ? 0xFFFFFF : 0x8E8E93), 0);
+        g_query[0] ? th_text() : th_text3(), 0);
     if(g_clear){
         if(g_query[0]) lv_obj_clear_flag(g_clear, LV_OBJ_FLAG_HIDDEN);
         else           lv_obj_add_flag(g_clear, LV_OBJ_FLAG_HIDDEN);

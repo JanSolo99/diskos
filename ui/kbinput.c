@@ -124,7 +124,7 @@ static void skb_add(skb_t *c, skb_kind_t kind, uint8_t row, uint8_t col,
     lv_obj_set_style_border_color(k->btn,th_fill3(),0);
     lv_obj_set_style_bg_color(k->btn,th_card(),0);
     lv_obj_set_style_bg_color(k->btn,th_fill3(),LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(k->btn,lv_color_hex(0x425a78),LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(k->btn,lv_color_mix(ui_current_accent(), th_card(), 90),LV_STATE_CHECKED);
     lv_obj_set_style_pad_all(k->btn,0,0);
     k->label=lv_label_create(k->btn);
     lv_obj_set_style_text_font(k->label,th_font(16),0);

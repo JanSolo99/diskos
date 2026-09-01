@@ -32,7 +32,10 @@ static void mark_selected(void){
         if(g_row[i]){   /* selected row gets an accent ring + slightly lifted fill */
             lv_obj_set_style_border_width(g_row[i], i==cur ? 2 : 0, 0);
             lv_obj_set_style_border_color(g_row[i], ui_current_accent(), 0);
-            lv_obj_set_style_bg_color(g_row[i], lv_color_hex(i==cur ? 0x242426 : 0x1C1C1E), 0);
+            /* selected row sits a touch above the others; derive it from the card colour so it
+             * reads as "lifted" in both palettes rather than as a fixed dark grey. */
+            lv_obj_set_style_bg_color(g_row[i], i==cur ? lv_color_mix(th_card_press(), th_card(), 96)
+                                                       : th_card(), 0);
         }
     }
 }

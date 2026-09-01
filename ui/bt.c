@@ -425,7 +425,7 @@ static void add_dev_row(const char *mac, const char *name, int connected){
     lv_obj_remove_style_all(r);
     lv_obj_set_size(r, 280, 46);
     lv_obj_set_style_radius(r, 8, 0);
-    lv_obj_set_style_bg_color(r, lv_color_hex(connected ? 0x0A2A4A : 0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(r, connected ? lv_color_mix(lv_color_hex(0x0A84FF), th_card(), 48) : th_card(), 0);
     lv_obj_set_style_bg_opa(r, connected ? LV_OPA_COVER : LV_OPA_50, 0);
     lv_obj_set_style_bg_color(r, th_card_press(), LV_STATE_PRESSED);
     lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
@@ -454,7 +454,7 @@ static void add_dev_row(const char *mac, const char *name, int connected){
     lv_label_set_text(ic, LV_SYMBOL_BLUETOOTH);
     lv_obj_set_pos(ic, 252, 14);
     lv_obj_set_style_text_font(ic, th_font(14), 0);
-    lv_obj_set_style_text_color(ic, lv_color_hex(connected ? 0x0A84FF : 0x8E8E93), 0);
+    lv_obj_set_style_text_color(ic, connected ? lv_color_hex(0x0A84FF) : th_text3(), 0);
 }
 
 /* Show only real AUDIO devices (bluez Icon = audio-card / audio-headset / ...),

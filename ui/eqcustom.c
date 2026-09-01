@@ -126,7 +126,7 @@ static void make_col(lv_obj_t *parent, int idx, const char *flabel, const char *
     lv_label_set_text(fl, flabel);
     lv_obj_set_style_text_align(fl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(fl, th_font(14), 0);
-    lv_obj_set_style_text_color(fl, lv_color_hex(idx==NBAND ? 0xC7C7CC : 0x8E8E93), 0);
+    lv_obj_set_style_text_color(fl, idx==NBAND ? th_text2() : th_text3(), 0);
 
     *slot_slider = sl;
     *slot_val = val;

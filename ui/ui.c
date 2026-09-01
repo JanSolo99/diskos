@@ -1450,7 +1450,7 @@ void ui_create(lv_obj_t *root)
         lv_obj_set_size(dot, 7, 7);
         lv_obj_align(dot, LV_ALIGN_BOTTOM_MID, i==0 ? -8 : 8, -14);
         lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(dot, lv_color_hex(i==0 ? C_WHITE : C_LINE_SOFT), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(dot, i==0 ? th_text() : th_card_press(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(dot, i==0 ? LV_OPA_COVER : LV_OPA_60, LV_PART_MAIN);
     }
 

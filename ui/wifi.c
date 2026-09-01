@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "screens.h"
+#include <dirent.h>   /* /proc scan: pidof without a fork (see proc_running) */
 #include "config.h"
 #include <stdio.h>
 #include <string.h>
@@ -71,11 +72,40 @@ static int wifi_status(char *ssid, int scap, char *ip, int icap){
     return connected;
 }
 
-static int wifi_radio_on(void){
-    char buf[256];
-    run_cap("pidof wpa_supplicant 2>/dev/null", buf, sizeof buf);
-    return buf[0] ? 1 : 0;
+/* Is a process with this name running? Read /proc directly instead of shelling out
+ * to pidof.
+ *
+ * wifi_supervise() calls this every 5 seconds for the life of the process - including
+ * while the screen is off, since the main loop keeps running - and the old popen()
+ * meant a fork+exec+shell on the LVGL thread each time, unbounded. That is the same
+ * shape of hazard as the hcitool probe that could leave the screen unwakeable, and
+ * it also burnt ~17k needless process spawns a day on a battery device. Reading
+ * /proc costs a few directory entries and cannot block on anything but the kernel. */
+static int proc_running(const char *name)
+{
+    DIR *d = opendir("/proc");
+    if(!d) return 0;
+    struct dirent *e;
+    int found = 0;
+    while(!found && (e = readdir(d))){
+        if(e->d_name[0] < '0' || e->d_name[0] > '9') continue;   /* only pid dirs */
+        char p[280];   /* sized for the longest possible d_name; a pid dir is far shorter */
+        snprintf(p, sizeof p, "/proc/%s/comm", e->d_name);
+        FILE *f = fopen(p, "r");
+        if(!f) continue;                                          /* process exited mid-scan */
+        char comm[64] = {0};
+        if(fgets(comm, sizeof comm, f)){
+            char *nl = strchr(comm, '\n'); if(nl) *nl = 0;
+            /* /proc/<pid>/comm is truncated to 15 chars, so compare on that prefix -
+             * "wpa_supplicant" is 14, but keep this correct for longer names too. */
+            if(!strncmp(comm, name, 15)) found = 1;
+        }
+        fclose(f);
+    }
+    closedir(d);
+    return found;
 }
+static int wifi_radio_on(void){ return proc_running("wpa_supplicant"); }
 
 /* ---- persistence / auto-reconnect hardening ----------------------------- */
 /* Make the running supplicant's config writable, keep EVERY saved network a candidate
@@ -427,7 +457,7 @@ static void add_signal_bars(lv_obj_t *parent, int x, int y, int sig){
         lv_obj_set_pos(b, x + i*6, y + (17 - h[i]));
         lv_obj_set_style_radius(b, 1, 0);
         lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(b, lv_color_hex(i < bars ? 0xFFFFFF : 0x3A3A3C), 0);
+        lv_obj_set_style_bg_color(b, i < bars ? th_text() : th_fill3(), 0);
     }
 }
 
@@ -436,7 +466,7 @@ static void add_net_row(const char *ssid, int signal, int secured, int connected
     lv_obj_remove_style_all(r);
     lv_obj_set_size(r, 280, 46);
     lv_obj_set_style_radius(r, 8, 0);
-    lv_obj_set_style_bg_color(r, lv_color_hex(connected ? 0x0A2A4A : 0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(r, connected ? lv_color_mix(lv_color_hex(0x0A84FF), th_card(), 48) : th_card(), 0);
     lv_obj_set_style_bg_opa(r, connected ? LV_OPA_COVER : LV_OPA_50, 0);
     lv_obj_set_style_bg_color(r, th_card_press(), LV_STATE_PRESSED);
     lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);

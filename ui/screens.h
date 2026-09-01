@@ -109,6 +109,9 @@ void home_set_accent(lv_color_t accent);
 void saver_set_accent(lv_color_t accent);
 void saver_show_sync(void);   /* apply saver-style + accent immediately on saver show */
 int  saver_wants_bright(void);/* 1 = keep full brightness (vinyl art showcase), don't dim */
+/* Suspend the UI liveness watchdog around an operation that deliberately blocks the
+ * LVGL thread (launching an app, a long SD walk). Always pair on/off. */
+void ui_watchdog_pause(int on);
 int  ui_run_bounded(char *const argv[], int timeout_ms);  /* external cmd as a killable child w/ hard timeout */
 void tune_refresh(void);      /* re-sync Tune panel Play Mode/EQ labels on show */
 

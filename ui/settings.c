@@ -160,7 +160,12 @@ static void apply_rescan(int v){ (void)v;
     scanview_open();
 }
 static void apply_import_m3u(int v){ (void)v;
+    /* This walks the card on the LVGL thread. It is normally quick, but a slow or
+     * failing card could stretch it - declare it so the liveness watchdog doesn't
+     * read a deliberately blocked loop as a hang and restart the UI mid-import. */
+    ui_watchdog_pause(1);
     int n = mdb_import_m3u_sd("/tmp/sdcard");   /* root + case-insensitive Music/Playlist(s) subdirs */
+    ui_watchdog_pause(0);
     char b[48];
     if(n <= 0) snprintf(b, sizeof b, "No new playlists found");
     else       snprintf(b, sizeof b, "Imported %d playlist%s", n, n==1 ? "" : "s");
@@ -723,8 +728,7 @@ void settings_open_group(int gi){
     groups_build();
     if(gi < 0 || gi >= g_ngroups || !g_group_root) return;
     g_cur_group = gi;
-    screen_show(SCR_SETTINGS_GROUP);
-    settings_group_refresh();
+    screen_show(SCR_SETTINGS_GROUP);   /* the transition rebuilds it for g_cur_group */
 }
 
 /* Rebuild the group screen for g_cur_group. Called on every entry (and after a

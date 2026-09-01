@@ -289,7 +289,7 @@ void nphub_create(lv_obj_t *root){
         lv_obj_set_size(dot, 7, 7);
         lv_obj_align(dot, LV_ALIGN_BOTTOM_MID, i==0 ? -8 : 8, -10);
         lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(dot, lv_color_hex(i==1 ? 0xFFFFFF : 0x48484A), 0);
+        lv_obj_set_style_bg_color(dot, i==1 ? th_text() : th_text3(), 0);
         lv_obj_set_style_bg_opa(dot, i==1 ? LV_OPA_COVER : LV_OPA_60, 0);
     }
 }

@@ -107,10 +107,16 @@ static void transition(int from, int to, int dir)
     /* Re-sync screens built once, on EVERY entry incl. back-navigation (screen_back also
      * routes through here - screen_show alone missed the back case, leaving stale labels
      * e.g. after editing Custom EQ / a setting detail page). */
+    /* The scan screen's poll is gated on visibility. This is a SEPARATE statement from
+     * the entry-refresh chain below on purpose: folding it in as another `else if`
+     * would swallow the rest of the chain whenever we leave the scan screen - and the
+     * most important case is leaving it FOR the Library, right after a scan changed
+     * what the Library should show. */
+    if (from == SCR_SCAN && to != SCR_SCAN) scanview_set_visible(0);
+    else if (to == SCR_SCAN)               scanview_set_visible(1);
+
     if (to == SCR_SETTINGS) settings_refresh_list();
     else if (to == SCR_SETTINGS_GROUP) settings_group_refresh();   /* rebuilt on every entry: values are never stale */
-    if (to != SCR_SCAN && from == SCR_SCAN) scanview_set_visible(0);   /* stop polling once it is off screen */
-    else if (to == SCR_SCAN) scanview_set_visible(1);
     else if (to == SCR_TUNE)  tune_refresh();
     else if (to == SCR_SAVER) saver_show_sync();
     else if (to == SCR_PLVIEW) plview_refresh();   /* fresh song list every entry (no stale tap positions) */
@@ -261,7 +267,7 @@ int screen_current(void){ return s_current; }
 void screens_init(void)
 {
     if (s_roots[SCR_HOME]) {
-        screen_show(SCR_HOME);
+        screen_home();
         return;
     }
 
@@ -350,7 +356,11 @@ void screens_init(void)
     bt_info_create(s_roots[SCR_BT_INFO]);
     lastfm_create(s_roots[SCR_LASTFM]);
 
-    screen_show(SCR_HOME);
+    /* screen_home(), NOT screen_show(SCR_HOME): s_current already IS SCR_HOME here, and
+     * screen_show() correctly treats "go to where you already are" as a no-op. Every root
+     * is created visible and stacked, so something must explicitly raise Home and hide the
+     * rest - that is what the transition inside screen_home() does. */
+    screen_home();
 }
 
 void screen_set_anim(int on){ s_anim = on ? 1 : 0; }

@@ -225,6 +225,7 @@ static _Atomic uint32_t g_heartbeat;
  * Suspend the watchdog for the duration so a long-running app is never mistaken for
  * a hang - the one legitimate reason the heartbeat stops. */
 static _Atomic int g_watchdog_paused;
+void ui_watchdog_pause(int on);   /* exported: see screens.h */
 static void watchdog_pause(int on){
     atomic_store(&g_watchdog_paused, on ? 1 : 0);
     if(!on) atomic_store(&g_heartbeat, lv_tick_get());   /* fresh stamp on resume */
@@ -254,6 +255,10 @@ static void *ui_watchdog(void *arg)
     }
     return NULL;
 }
+/* Exposed so any other deliberately-blocking main-thread operation can declare
+ * itself, rather than being mistaken for a hang. */
+void ui_watchdog_pause(int on){ watchdog_pause(on); }
+
 static void ui_watchdog_start(void)
 {
     pthread_t th;
@@ -533,7 +538,14 @@ static void usb_connect_watch(lv_timer_t *t)
     uint32_t at = atomic_load(&g_source_switch_at);
     if(at && lv_tick_elaps(at) < SOURCE_SETTLE_MS) return;   /* our own switch still settling */
 
-    if(!exported){ armed = 1; return; }   /* unplugged / back to local: re-arm */
+    if(!exported){
+        armed = 1;                        /* unplugged / back to local: re-arm */
+        /* A storage session the user chose ends when the host lets go. Clear the
+         * mirror then, or the next connection looks like "we are already in storage
+         * mode" and is never noticed - so the prompt would appear only once per boot. */
+        if(g_source_mode == 3 && !sd_exported_to_host()) g_source_mode = 0;
+        return;
+    }
     if(!armed) return;                    /* already handled this connection */
     armed = 0;
 

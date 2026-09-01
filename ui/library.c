@@ -743,7 +743,7 @@ void library_create(lv_obj_t *root){
             lv_obj_remove_style_all(cell);
             lv_obj_set_pos(cell, row_x0+c*cw, y0+r*ch); lv_obj_set_size(cell, cw-4, ch-4);
             lv_obj_set_style_radius(cell, 8, 0);
-            lv_obj_set_style_bg_color(cell, lv_color_hex(0xFF375F), LV_STATE_PRESSED);
+            lv_obj_set_style_bg_color(cell, ui_current_accent(), LV_STATE_PRESSED);
             lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, LV_STATE_PRESSED);
             lv_obj_add_event_cb(cell, letter_cb, LV_EVENT_CLICKED, (void*)(intptr_t)AZ[i]);
             lv_obj_t *l=lv_label_create(cell);
