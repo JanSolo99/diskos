@@ -282,7 +282,7 @@ void lyrics_poll(lv_timer_t *t)
 
 void lyrics_create(lv_obj_t *root)
 {
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     ui_header(root, "Lyrics");   /* shared standard header */
@@ -299,6 +299,6 @@ void lyrics_create(lv_obj_t *root)
     lv_label_set_long_mode(g_text, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(g_text, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(g_text, ui_font_cjk(16), 0);   /* CJK lyrics render via Source Han Sans fallback */
-    lv_obj_set_style_text_color(g_text, lv_color_hex(0xE5E5EA), 0);
+    lv_obj_set_style_text_color(g_text, th_text(), 0);
     lv_label_set_text(g_text, "");
 }

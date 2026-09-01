@@ -15,7 +15,7 @@ static lv_obj_t *g_val[F_COUNT];
 
 void songinfo_create(lv_obj_t *root)
 {
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     ui_header(root, "Song Info");   /* standard shared header */
@@ -41,14 +41,14 @@ void songinfo_create(lv_obj_t *root)
 
         lv_obj_t *k = lv_label_create(cell);
         lv_label_set_text(k, KEYS[i]);
-        lv_obj_set_style_text_font(k, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(k, lv_color_hex(0x8E8E93), 0);
+        lv_obj_set_style_text_font(k, th_font(14), 0);
+        lv_obj_set_style_text_color(k, th_text3(), 0);
 
         lv_obj_t *v = lv_label_create(cell);
         lv_obj_set_width(v, 278);
         lv_label_set_long_mode(v, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_font(v, ui_font_cjk(16), 0);   /* CJK titles/artist/album via Source Han Sans fallback (was montserrat_16 -> boxes) */
-        lv_obj_set_style_text_color(v, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(v, th_text(), 0);
         lv_label_set_text(v, "-");
         g_val[i] = v;
     }

@@ -70,10 +70,11 @@ static void apply_sleep(int idx){
 }
 static void apply_np_style(int v){ ui_set_np_style(v); }
 static void apply_rescan(int v){ (void)v;
-    ui_rescan_library();
-    /* 0622 has no completion oracle, so we can't say when/whether it finished -
-     * acknowledge the REQUEST honestly rather than implying completion. */
-    ui_toast("Rescan requested");
+    /* Open the progress screen, which starts the scan itself. The old behaviour -
+     * fire and forget, toast "Rescan requested", never mention it again - left no way
+     * to tell a running scan from a failed one. */
+    ui_invalidate_play_scope();   /* the library is about to change under the player */
+    scanview_open();
 }
 static void apply_import_m3u(int v){ (void)v;
     int n = mdb_import_m3u_sd("/tmp/sdcard");   /* root + case-insensitive Music/Playlist(s) subdirs */
@@ -114,12 +115,12 @@ static void boot_modal_pill(lv_obj_t *card, int x, const char *txt, uint32_t col
     lv_obj_remove_style_all(b);
     lv_obj_set_size(b, 108, 42); lv_obj_align(b, LV_ALIGN_BOTTOM_MID, x, -16);
     lv_obj_set_style_radius(b, 12, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(0x2C2C2E), 0);
+    lv_obj_set_style_bg_color(b, th_card_press(), 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, txt);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
     lv_obj_set_style_text_color(l, lv_color_hex(col), 0);
     lv_obj_center(l);
 }
@@ -128,7 +129,7 @@ static void apply_restart(int v){ (void)v;
     g_boot_modal = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(g_boot_modal);
     lv_obj_set_size(g_boot_modal, 360, 360); lv_obj_center(g_boot_modal);
-    lv_obj_set_style_bg_color(g_boot_modal, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(g_boot_modal, th_bg(), 0);
     lv_obj_set_style_bg_opa(g_boot_modal, LV_OPA_70, 0);
     lv_obj_clear_flag(g_boot_modal, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(g_boot_modal, LV_OBJ_FLAG_CLICKABLE);                       /* absorb taps */
@@ -137,21 +138,21 @@ static void apply_restart(int v){ (void)v;
     lv_obj_remove_style_all(card);
     lv_obj_set_size(card, 280, 184); lv_obj_center(card);
     lv_obj_set_style_radius(card, 18, 0);
-    lv_obj_set_style_bg_color(card, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(card, th_card(), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *t = lv_label_create(card);
     lv_label_set_text(t, "Restart now?");
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(t, th_font(16), 0);
+    lv_obj_set_style_text_color(t, th_text(), 0);
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 22);
     lv_obj_t *s = lv_label_create(card);
     lv_label_set_text(s, "Boots your default UI. Hold Vol-Up at power-on for the other one.");
     lv_label_set_long_mode(s, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s, 236);
     lv_obj_set_style_text_align(s, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(s, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(s, lv_color_hex(0x8E8E93), 0);
+    lv_obj_set_style_text_font(s, th_font(14), 0);
+    lv_obj_set_style_text_color(s, th_text3(), 0);
     lv_obj_align(s, LV_ALIGN_TOP_MID, 0, 50);
     boot_modal_pill(card, -58, "Cancel",  0xC7C7CC, boot_cancel_cb);
     boot_modal_pill(card,  58, "Restart", 0xF23260, boot_confirm_cb);
@@ -286,7 +287,7 @@ static const setting_t TABLE[] = {
     { "System",   "Sleep Timer", ST_CYCLER, "sleep_idx", 0,0,0, OPT_SLEEP, 6, NULL, apply_sleep, 0,
       "Pause playback after this long. Resets on restart.", NULL },
     { "System",   "Rescan Library", ST_ACTION, NULL, 0,0,0, NULL,0, "Scan", apply_rescan, 0,
-      "Re-scan the SD card for new or removed music.", NULL },
+      "Re-scan the SD card for new or removed music. Shows live progress; you can leave the screen and it keeps going.", NULL },
     { "System",   "Import Playlists", ST_ACTION, NULL, 0,0,0, NULL,0, "Import", apply_import_m3u, 0,
       "Import .m3u / .m3u8 playlists found on the SD card.", NULL },
     { "System",   "Default UI",  ST_CYCLER, "boot_default", 0,0,0, OPT_BOOTDEF, 2, NULL, apply_boot_default, 0,
@@ -379,7 +380,7 @@ static void detail_toggle_cb(lv_event_t *e){
 void setting_detail_refresh(void){
     if(!g_detail_root || !g_active) return;
     lv_obj_clean(g_detail_root);
-    lv_obj_set_style_bg_color(g_detail_root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(g_detail_root, th_bg(), 0);
     lv_obj_set_style_bg_opa(g_detail_root, LV_OPA_COVER, 0);
     ui_header_cb(g_detail_root, g_active->label, detail_back_cb);   /* shared header */
 
@@ -393,15 +394,15 @@ void setting_detail_refresh(void){
         lv_obj_align(sl, LV_ALIGN_CENTER, 0, -6);
         lv_slider_set_range(sl, s->min, s->max);
         lv_slider_set_value(sl, v, LV_ANIM_OFF);
-        lv_obj_set_style_bg_color(sl, lv_color_hex(0x2C2C2E), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(sl, th_card_press(), LV_PART_MAIN);
         lv_obj_set_style_bg_color(sl, lv_color_hex(ACCENT), LV_PART_INDICATOR);
-        lv_obj_set_style_bg_color(sl, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+        lv_obj_set_style_bg_color(sl, th_text(), LV_PART_KNOB);
         lv_obj_t *vl = lv_label_create(g_detail_root);
         char b[16]; val_text(s,b,sizeof b); lv_label_set_text(vl,b);
         lv_obj_set_width(vl, 360); lv_obj_align(vl, LV_ALIGN_CENTER, 0, 40);
         lv_obj_set_style_text_align(vl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_color(vl, lv_color_hex(ACCENT), 0);
-        lv_obj_set_style_text_font(vl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(vl, th_font(20), 0);
         lv_obj_add_event_cb(sl, detail_slider_cb, LV_EVENT_VALUE_CHANGED, vl);
         lv_obj_add_event_cb(sl, detail_slider_release_cb, LV_EVENT_RELEASED, NULL);
         lv_obj_add_event_cb(sl, detail_slider_release_cb, LV_EVENT_PRESS_LOST, NULL);
@@ -418,26 +419,26 @@ void setting_detail_refresh(void){
         lv_obj_set_width(vl, 220); lv_obj_align(vl, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_text_align(vl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_color(vl, lv_color_hex(ACCENT), 0);
-        lv_obj_set_style_text_font(vl, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_font(vl, th_font(24), 0);
         lv_obj_t *lb = lv_button_create(g_detail_root);
         lv_obj_remove_style_all(lb); lv_obj_set_size(lb, 48, 48);
         lv_obj_align(lb, LV_ALIGN_CENTER, -110, 0);
         lv_obj_t *li = lv_label_create(lb); lv_label_set_text(li, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_color(li, lv_color_hex(0xFFFFFF), 0); lv_obj_center(li);
+        lv_obj_set_style_text_color(li, th_text(), 0); lv_obj_center(li);
         lv_obj_add_event_cb(lb, detail_cycle_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)-1);
         lv_obj_t *rb = lv_button_create(g_detail_root);
         lv_obj_remove_style_all(rb); lv_obj_set_size(rb, 48, 48);
         lv_obj_align(rb, LV_ALIGN_CENTER, 110, 0);
         lv_obj_t *ri = lv_label_create(rb); lv_label_set_text(ri, LV_SYMBOL_RIGHT);
-        lv_obj_set_style_text_color(ri, lv_color_hex(0xFFFFFF), 0); lv_obj_center(ri);
+        lv_obj_set_style_text_color(ri, th_text(), 0); lv_obj_center(ri);
         lv_obj_add_event_cb(rb, detail_cycle_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)1);
     } else { /* readonly */
         lv_obj_t *vl = lv_label_create(g_detail_root);
         lv_label_set_text(vl, s->ro_val?s->ro_val:"");
         lv_obj_set_width(vl, 360); lv_obj_align(vl, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_text_align(vl, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_text_color(vl, lv_color_hex(0xC7C7CC), 0);
-        lv_obj_set_style_text_font(vl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_color(vl, th_text2(), 0);
+        lv_obj_set_style_text_font(vl, th_font(20), 0);
     }
 
     /* description at the bottom - per-option for cyclers (refreshes on change) */
@@ -450,12 +451,21 @@ void setting_detail_refresh(void){
         lv_obj_set_width(d, 240);
         lv_obj_align(d, LV_ALIGN_BOTTOM_MID, 0, -40);
         lv_obj_set_style_text_align(d, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_text_font(d, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(d, lv_color_hex(0x8E8E93), 0);
+        lv_obj_set_style_text_font(d, th_font(14), 0);
+        lv_obj_set_style_text_color(d, th_text3(), 0);
     }
 }
 
 void setting_detail_create(lv_obj_t *root){ g_detail_root = root; }
+
+/* Open a setting's detail page by LABEL. Lets other screens (e.g. the Quick Settings
+ * EQ tile) deep-link to a control without hard-coding a TABLE index that would silently
+ * point at the wrong row the moment a setting is added above it. */
+void settings_open_named(const char *label){
+    if(!label) return;
+    for(int i=0;i<N_SETTINGS;i++)
+        if(!strcmp(TABLE[i].label, label)){ settings_open_detail(i); return; }
+}
 
 /* open a specific setting's detail page directly (verification / deep-link) */
 void settings_open_detail(int idx){
@@ -465,7 +475,55 @@ void settings_open_detail(int idx){
     setting_detail_refresh();
 }
 
-/* ---- master list -------------------------------------------------------- */
+/* ---- master list: categories, then one screen per category ---------------
+ * Settings used to be ONE flat scroll of every row in TABLE[], with the group
+ * names as inline sub-headers. That put "Rescan Library" - something you reach
+ * for whenever you add music - about thirty rows down, so every use meant a long
+ * blind scroll on a 360px round screen where only five rows are visible at once.
+ *
+ * Now SCR_SETTINGS is a short INDEX of the groups (five rows, no scrolling), and
+ * each group opens its own short list on SCR_SETTINGS_GROUP. Nothing about the
+ * settings themselves changed: TABLE[] is still the single source of truth, and
+ * the groups are derived from it, so adding a row to a group needs no other edit. */
+
+/* Distinct groups, in TABLE order. Built once; TABLE groups its rows, so a simple
+ * "differs from the previous" scan is enough. */
+#define MAX_GROUPS 12
+static const char *g_groups[MAX_GROUPS];
+static int         g_group_first[MAX_GROUPS];   /* index of the group's first TABLE row */
+static int         g_ngroups;
+static int         g_cur_group = -1;            /* group shown on SCR_SETTINGS_GROUP */
+static lv_obj_t   *g_group_root;
+static lv_obj_t   *g_group_title;
+
+static void groups_build(void){
+    if(g_ngroups) return;
+    for(int i=0;i<N_SETTINGS;i++){
+        if(g_ngroups && !strcmp(g_groups[g_ngroups-1], TABLE[i].group)) continue;
+        if(g_ngroups >= MAX_GROUPS) break;
+        g_group_first[g_ngroups] = i;
+        g_groups[g_ngroups++]    = TABLE[i].group;
+    }
+}
+/* A one-line summary for the index row, so a category is worth reading before you
+ * open it. Kept short - the row has ~130px of space. */
+static const char *group_hint(const char *group){
+    if(!strcmp(group, "Playback")) return "Mode, EQ, resume";
+    if(!strcmp(group, "Audio"))    return "Gain, filter, volume";
+    if(!strcmp(group, "Display"))  return "Theme, font, brightness";
+    if(!strcmp(group, "Network"))  return "Wi-Fi, Bluetooth";
+    if(!strcmp(group, "System"))   return "Library, power, about";
+    return NULL;
+}
+static const char *group_glyph(const char *group){
+    if(!strcmp(group, "Playback")) return LV_SYMBOL_PLAY;
+    if(!strcmp(group, "Audio"))    return LV_SYMBOL_AUDIO;
+    if(!strcmp(group, "Display"))  return LV_SYMBOL_IMAGE;
+    if(!strcmp(group, "Network"))  return LV_SYMBOL_WIFI;
+    if(!strcmp(group, "System"))   return LV_SYMBOL_SETTINGS;
+    return LV_SYMBOL_RIGHT;
+}
+
 static void list_back_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) screen_back(); }
 
 static void row_cb(lv_event_t *e){
@@ -491,66 +549,117 @@ static void row_cb(lv_event_t *e){
     setting_detail_refresh();
 }
 
-void settings_create(lv_obj_t *root){
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
-    ui_header_cb(root, "Settings", list_back_cb);   /* shared header */
+/* Shared row chrome for both the index and the per-group lists. */
+static lv_obj_t *settings_row(lv_obj_t *list, const char *label, const char *value,
+                              int dim_value, lv_event_cb_t cb, void *ud, lv_obj_t **out_val){
+    lv_obj_t *row = lv_button_create(list);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, 288, 50);
+    lv_obj_set_style_radius(row, 12, 0);
+    lv_obj_set_style_bg_color(row, th_card(), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_70, 0);
+    lv_obj_set_style_bg_color(row, th_card_press(), LV_STATE_PRESSED);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, ud);
 
+    lv_obj_t *lbl = lv_label_create(row);
+    lv_label_set_text(lbl, label);
+    lv_obj_set_pos(lbl, 14, 15);
+    lv_obj_set_style_text_font(lbl, th_font(16), 0);
+    lv_obj_set_style_text_color(lbl, th_text(), 0);
+
+    lv_obj_t *vl = lv_label_create(row);
+    lv_label_set_text(vl, value ? value : "");
+    lv_label_set_long_mode(vl, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(vl, 150, 16);
+    lv_obj_set_size(vl, 124, 20);
+    lv_obj_set_style_text_align(vl, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(vl, th_font(14), 0);
+    lv_obj_set_style_text_color(vl, dim_value ? th_text3() : th_text2(), 0);
+    if(out_val) *out_val = vl;
+    return row;
+}
+
+/* A scrollable column sized to the round screen, used by both settings screens. */
+static lv_obj_t *settings_list(lv_obj_t *root){
     lv_obj_t *list = lv_obj_create(root);
     lv_obj_remove_style_all(list);
     lv_obj_set_pos(list, 30, 70);
     lv_obj_set_size(list, 300, 250);
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_bottom(list, 30, 0);
+    lv_obj_set_style_pad_row(list, 6, 0);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
     lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    return list;
+}
 
-    const char *cur_group = NULL;
+/* ---- per-group screen --------------------------------------------------- */
+static void group_row_open_cb(lv_event_t *e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
+    settings_open_group((int)(uintptr_t)lv_event_get_user_data(e));
+}
+
+void settings_open_group(int gi){
+    groups_build();
+    if(gi < 0 || gi >= g_ngroups || !g_group_root) return;
+    g_cur_group = gi;
+    screen_show(SCR_SETTINGS_GROUP);
+    settings_group_refresh();
+}
+
+/* Rebuild the group screen for g_cur_group. Called on every entry (and after a
+ * detail-page edit) so the values shown are never stale. */
+void settings_group_refresh(void){
+    if(!g_group_root || g_cur_group < 0) return;
+    lv_obj_clean(g_group_root);
+    for(int i=0;i<N_SETTINGS;i++) g_list_rows[i] = NULL;
+
+    lv_obj_set_style_bg_color(g_group_root, th_bg(), 0);
+    lv_obj_set_style_bg_opa(g_group_root, LV_OPA_COVER, 0);
+    g_group_title = ui_header_cb(g_group_root, g_groups[g_cur_group], list_back_cb);
+
+    lv_obj_t *list = settings_list(g_group_root);
+    const char *want = g_groups[g_cur_group];
     for(int i=0;i<N_SETTINGS;i++){
         const setting_t *s = &TABLE[i];
-        if(!cur_group || strcmp(cur_group, s->group)){
-            cur_group = s->group;
-            lv_obj_t *gh = lv_label_create(list);
-            lv_label_set_text(gh, s->group);
-            lv_obj_set_style_text_font(gh, &lv_font_montserrat_14, 0);
-            lv_obj_set_style_text_color(gh, lv_color_hex(0x8E8E93), 0);
-            lv_obj_set_style_pad_top(gh, 10, 0);
-            lv_obj_set_style_pad_left(gh, 6, 0);
-        }
-        lv_obj_t *row = lv_button_create(list);
-        lv_obj_remove_style_all(row);
-        lv_obj_set_size(row, 288, 50);
-        lv_obj_set_style_radius(row, 12, 0);
-        lv_obj_set_style_bg_color(row, lv_color_hex(0x1C1C1E), 0);
-        lv_obj_set_style_bg_opa(row, LV_OPA_70, 0);
-        lv_obj_set_style_bg_color(row, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
-        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(row, row_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
-
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, s->label);
-        lv_obj_set_pos(lbl, 14, 15);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
-
+        if(strcmp(s->group, want)) continue;
         char b[24]; val_text(s, b, sizeof b);
-        lv_obj_t *vl = lv_label_create(row);
-        lv_label_set_text(vl, b);
-        lv_obj_set_pos(vl, 150, 16);
-        lv_obj_set_size(vl, 124, 20);
-        lv_obj_set_style_text_align(vl, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_style_text_font(vl, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(vl, lv_color_hex(s->type==ST_READONLY?0x8E8E93:0xC7C7CC), 0);
-        g_list_rows[i] = vl;
+        settings_row(list, s->label, b, s->type==ST_READONLY,
+                     row_cb, (void*)(uintptr_t)i, &g_list_rows[i]);
     }
 }
 
-/* Re-sync every visible row's value label from live cfg. The list is built once, but
- * cyclers/sliders are edited on the detail page (or change via apply fns), so the row
- * text goes stale otherwise - e.g. the Screensaver row showing "Off" while its detail
- * page reads "1 min". Called whenever the Settings screen is shown. */
+void settings_group_create(lv_obj_t *root){ g_group_root = root; }
+
+/* ---- category index ----------------------------------------------------- */
+void settings_create(lv_obj_t *root){
+    groups_build();
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+    ui_header_cb(root, "Settings", list_back_cb);
+
+    lv_obj_t *list = settings_list(root);
+    for(int gi=0; gi<g_ngroups; gi++){
+        lv_obj_t *vl = NULL;
+        lv_obj_t *row = settings_row(list, g_groups[gi], group_hint(g_groups[gi]), 1,
+                                     group_row_open_cb, (void*)(uintptr_t)gi, &vl);
+        /* leading glyph, so the five categories are distinguishable at a glance */
+        lv_obj_t *ic = lv_label_create(row);
+        lv_label_set_text(ic, group_glyph(g_groups[gi]));
+        lv_obj_set_pos(ic, 262, 16);
+        lv_obj_set_style_text_font(ic, th_font(16), 0);
+        lv_obj_set_style_text_color(ic, th_text3(), 0);
+        if(vl){ lv_obj_set_pos(vl, 110, 17); lv_obj_set_size(vl, 146, 18); }
+    }
+}
+
+/* Re-sync every visible row's value label from live cfg. Rows are edited on the
+ * detail page (or change via apply fns), so the text goes stale otherwise - e.g.
+ * the Screensaver row showing "Off" while its detail page reads "1 min". Called
+ * whenever a settings screen is shown. */
 void settings_refresh_list(void){
     for(int i=0;i<N_SETTINGS;i++){
         if(!g_list_rows[i]) continue;

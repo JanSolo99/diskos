@@ -60,7 +60,7 @@ static void row_cb(lv_event_t *e){
 void modes_open(void){ mark_selected(); screen_show(SCR_WORKMODE); }
 
 void modes_create(lv_obj_t *root){
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     /* back button (kept out of the clipped top-left corner) */
@@ -82,30 +82,30 @@ void modes_create(lv_obj_t *root){
         lv_obj_remove_style_all(row);
         lv_obj_set_size(row, 276, 54);
         lv_obj_set_style_radius(row, 14, 0);
-        lv_obj_set_style_bg_color(row, lv_color_hex(0x1C1C1E), 0);
+        lv_obj_set_style_bg_color(row, th_card(), 0);
         lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(row, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(row, th_card_press(), LV_STATE_PRESSED);
         lv_obj_add_event_cb(row, row_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
 
         lv_obj_t *nm = lv_label_create(row);
         lv_label_set_text(nm, MODES[i].name);
         lv_obj_set_pos(nm, 16, 9);
-        lv_obj_set_style_text_font(nm, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(nm, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_font(nm, th_font(16), 0);
+        lv_obj_set_style_text_color(nm, th_text(), 0);
 
         lv_obj_t *sb = lv_label_create(row);
         lv_label_set_text(sb, MODES[i].sub);
         lv_obj_set_pos(sb, 16, 30);
         lv_obj_set_width(sb, 210);                       /* keep clear of the right-side checkmark */
         lv_label_set_long_mode(sb, LV_LABEL_LONG_DOT);
-        lv_obj_set_style_text_font(sb, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(sb, lv_color_hex(0x8E8E93), 0);
+        lv_obj_set_style_text_font(sb, th_font(12), 0);
+        lv_obj_set_style_text_color(sb, th_text3(), 0);
 
         g_check[i] = lv_label_create(row);
         lv_label_set_text(g_check[i], "");
         lv_obj_align(g_check[i], LV_ALIGN_RIGHT_MID, -14, 0);
         lv_obj_set_style_text_color(g_check[i], ui_current_accent(), 0);
-        lv_obj_set_style_text_font(g_check[i], &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_check[i], th_font(18), 0);
     }
     mark_selected();
 }

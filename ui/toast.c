@@ -22,7 +22,7 @@ void ui_toast(const char *msg)
 
     g_toast = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(g_toast);
-    lv_obj_set_style_bg_color(g_toast, lv_color_hex(0x2C2C2E), 0);
+    lv_obj_set_style_bg_color(g_toast, th_card_press(), 0);
     lv_obj_set_style_bg_opa(g_toast, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(g_toast, 16, 0);
     lv_obj_set_style_pad_all(g_toast, 12, 0);
@@ -37,8 +37,8 @@ void ui_toast(const char *msg)
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(l, 204);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
+    lv_obj_set_style_text_color(l, th_text(), 0);
 
     g_toast_timer = lv_timer_create(toast_hide_cb, 2200, NULL);
 }

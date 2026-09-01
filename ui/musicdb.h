@@ -44,6 +44,12 @@ int  mdb_artists(char names[][MDB_STR], int cap);
 /* Distinct genres/tags (with track count). */
 int  mdb_genres(char names[][MDB_STR], int *counts, int cap);
 
+/* Albums an artist appears on (+ that artist's track count per album), sorted by
+ * album name. Drives the Artist -> Albums -> Tracks level in the Library. */
+int  mdb_artist_albums(const char *artist, char names[][MDB_STR], int *counts, int cap);
+/* One artist's tracks from one album, in library order. */
+int  mdb_artist_album_songs(const char *artist, const char *album, const mdb_song_t **out, int cap);
+
 /* Fill out[] with songs in an album / by an artist token / in a genre. Returns count. */
 int  mdb_album_songs(const char *album, const mdb_song_t **out, int cap);
 int  mdb_artist_songs(const char *artist, const mdb_song_t **out, int cap);

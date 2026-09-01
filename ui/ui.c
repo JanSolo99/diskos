@@ -333,7 +333,7 @@ static void apply_accent(void)
     }
 
     if(cover_note) {
-        lv_obj_set_style_text_color(cover_note, lv_color_hex(C_WHITE), LV_PART_MAIN);
+        lv_obj_set_style_text_color(cover_note, th_text(), LV_PART_MAIN);
     }
 
     if(btn_pp) {
@@ -364,6 +364,14 @@ lv_color_t ui_current_accent(void){ return accent; }
 
 /* ---- shared standard header (back chevron + centred title) ------------------------------------- */
 static void ui_header_back_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) screen_back(); }
+/* Long-press the back chevron on ANY screen -> straight Home, however deep you are.
+ * A short press still steps back one rung (or runs the screen's own back handler),
+ * so this adds an escape hatch without changing what the chevron already did. */
+static void ui_header_home_cb(lv_event_t *e){
+    if(lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
+    screen_home();
+    ui_toast("Home");
+}
 /* full form: custom back handler (e.g. Library pops its view stack before leaving the screen). */
 lv_obj_t *ui_header_cb(lv_obj_t *root, const char *title, lv_event_cb_t back_cb)
 {
@@ -372,13 +380,14 @@ lv_obj_t *ui_header_cb(lv_obj_t *root, const char *title, lv_event_cb_t back_cb)
     lv_obj_set_pos(back, 72, 24); lv_obj_set_size(back, 44, 40);   /* inset from the clipped corner */
     lv_obj_set_ext_click_area(back, 10);                            /* easier near the round bezel */
     lv_obj_set_style_radius(back, 20, 0);
-    lv_obj_set_style_bg_color(back, lv_color_hex(0x1C1C1E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(back, th_card(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(back, LV_OPA_70, LV_STATE_PRESSED);
     lv_obj_add_event_cb(back, back_cb ? back_cb : ui_header_back_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(back, ui_header_home_cb, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_t *ic = lv_label_create(back);
     lv_label_set_text(ic, LV_SYMBOL_LEFT);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(ic, lv_color_hex(0xC7C7CC), 0);
+    lv_obj_set_style_text_font(ic, th_font(20), 0);
+    lv_obj_set_style_text_color(ic, th_text2(), 0);
     lv_obj_align(ic, LV_ALIGN_CENTER, 0, -2);
 
     lv_obj_t *t = lv_label_create(root);
@@ -386,8 +395,8 @@ lv_obj_t *ui_header_cb(lv_obj_t *root, const char *title, lv_event_cb_t back_cb)
     lv_obj_set_pos(t, 44, 30); lv_obj_set_size(t, 272, 26);        /* full-width centred, clears chevron */
     lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(t, th_font(18), 0);
+    lv_obj_set_style_text_color(t, th_text(), 0);
     return t;
 }
 lv_obj_t *ui_header(lv_obj_t *root, const char *title){ return ui_header_cb(root, title, NULL); }
@@ -402,7 +411,7 @@ static void fav_refresh(int on, int have)
     if(have) lv_obj_remove_flag(btn_fav, LV_OBJ_FLAG_HIDDEN);
     else     lv_obj_add_flag(btn_fav, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(fav_icon, on ? HEART_FILLED : HEART_OUTLINE);
-    lv_obj_set_style_text_color(fav_icon, on ? accent : lv_color_hex(C_TERTIARY), LV_PART_MAIN);
+    lv_obj_set_style_text_color(fav_icon, on ? accent : th_text3(), LV_PART_MAIN);
 }
 
 static void fav_click_cb(lv_event_t *e)
@@ -446,7 +455,7 @@ static void mode_refresh(int wm)
                      : (wm == 2 || wm == 3) ? LV_SYMBOL_LOOP
                      : MODE_ARROW;                       /* 0 and 4 use the arrow */
     lv_label_set_text(mode_icon, icon);
-    lv_obj_set_style_text_color(mode_icon, wm ? accent : lv_color_hex(C_TERTIARY), LV_PART_MAIN);
+    lv_obj_set_style_text_color(mode_icon, wm ? accent : th_text3(), LV_PART_MAIN);
     if(wm == 2 || wm == 4) lv_obj_remove_flag(mode_one, LV_OBJ_FLAG_HIDDEN);
     else                   lv_obj_add_flag(mode_one, LV_OBJ_FLAG_HIDDEN);
 }
@@ -1139,9 +1148,9 @@ static lv_font_t s_font20, s_font16, s_font14;
 static void ui_fonts_init(void)
 {
     if(s_font20.get_glyph_dsc) return;   /* once */
-    s_font20 = lv_font_montserrat_20; s_font20.fallback = &lv_font_source_han_16_cjk;
-    s_font16 = lv_font_montserrat_16; s_font16.fallback = &lv_font_source_han_16_cjk;
-    s_font14 = lv_font_montserrat_14; s_font14.fallback = &lv_font_source_han_16_cjk;
+    s_font20 = *th_font(20); s_font20.fallback = &lv_font_source_han_16_cjk;
+    s_font16 = *th_font(16); s_font16.fallback = &lv_font_source_han_16_cjk;
+    s_font14 = *th_font(14); s_font14.fallback = &lv_font_source_han_16_cjk;
 }
 
 /* Shared CJK-capable user-text font (montserrat + Source Han Sans fallback) for any screen
@@ -1182,7 +1191,7 @@ void ui_create(lv_obj_t *root)
 
     lv_obj_clean(scr);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(scr, lv_color_hex(C_BLACK), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scr, th_bg(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
 
     /* full-screen blurred album-art backdrop (created first = behind everything) */
@@ -1190,9 +1199,11 @@ void ui_create(lv_obj_t *root)
     backdrop = lv_image_create(scr);
     lv_obj_set_size(backdrop, 360, 360);
     lv_obj_align(backdrop, LV_ALIGN_CENTER, 0, 0);
-    /* darken the blurred art so foreground text/controls stay readable */
-    lv_obj_set_style_image_recolor(backdrop, lv_color_hex(C_BLACK), LV_PART_MAIN);
-    lv_obj_set_style_image_recolor_opa(backdrop, 150, LV_PART_MAIN);
+    /* Veil the blurred art toward the theme ground so foreground text stays readable.
+     * In dark mode that darkens it (as before); in light mode it WASHES it out toward
+     * white, which is what near-black text needs to stay legible over a dark cover. */
+    lv_obj_set_style_image_recolor(backdrop, th_bg(), LV_PART_MAIN);
+    lv_obj_set_style_image_recolor_opa(backdrop, theme_is_light() ? 200 : 150, LV_PART_MAIN);
     lv_obj_add_flag(backdrop, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(backdrop, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
@@ -1205,13 +1216,13 @@ void ui_create(lv_obj_t *root)
     lv_arc_set_rotation(ring, ARC_ROT);
     lv_arc_set_mode(ring, LV_ARC_MODE_NORMAL);
     lv_obj_set_style_arc_width(ring, 6, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(ring, lv_color_hex(C_LINE_SOFT), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(ring, th_card_press(), LV_PART_MAIN);
     lv_obj_set_style_arc_opa(ring, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_width(ring, 6, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(ring, accent, LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(ring, LV_OPA_COVER, LV_PART_INDICATOR);
     /* draggable seek: a small knob thumb + scrub handler */
-    lv_obj_set_style_bg_color(ring, lv_color_hex(C_WHITE), LV_PART_KNOB);
+    lv_obj_set_style_bg_color(ring, th_text(), LV_PART_KNOB);
     lv_obj_set_style_bg_opa(ring, LV_OPA_COVER, LV_PART_KNOB);
     lv_obj_set_style_pad_all(ring, 5, LV_PART_KNOB);
     lv_obj_clear_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
@@ -1225,7 +1236,7 @@ void ui_create(lv_obj_t *root)
     lv_obj_align(cover, LV_ALIGN_TOP_MID, 0, 42);
     lv_obj_set_style_radius(cover, 14, LV_PART_MAIN);
     lv_obj_set_style_clip_corner(cover, true, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(cover, lv_color_hex(C_LINE), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(cover, th_card(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(cover, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(cover, 0, LV_PART_MAIN);
     lv_obj_clear_flag(cover, LV_OBJ_FLAG_SCROLLABLE);
@@ -1244,7 +1255,7 @@ void ui_create(lv_obj_t *root)
     lv_obj_clear_flag(cover_img, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
     cover_note = lv_label_create(cover);
-    style_text(cover_note, &lv_font_montserrat_28, lv_color_hex(C_WHITE));
+    style_text(cover_note, th_font(28), th_text());
     lv_label_set_text(cover_note, LV_SYMBOL_AUDIO);
     lv_obj_set_style_text_opa(cover_note, LV_OPA_90, LV_PART_MAIN);
     lv_obj_center(cover_note);
@@ -1265,7 +1276,7 @@ void ui_create(lv_obj_t *root)
     lv_obj_set_size(hole, 8, 8);
     lv_obj_center(hole);
     lv_obj_set_style_radius(hole, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(hole, lv_color_hex(C_BLACK), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hole, th_bg(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(hole, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_add_flag(spindle, LV_OBJ_FLAG_HIDDEN);
 
@@ -1286,7 +1297,7 @@ void ui_create(lv_obj_t *root)
     lv_obj_add_event_cb(btn_fav, fav_click_cb, LV_EVENT_CLICKED, NULL);
     fav_icon = lv_label_create(btn_fav);
     lv_obj_set_style_text_font(fav_icon, &font_icons_28, LV_PART_MAIN);
-    lv_obj_set_style_text_color(fav_icon, lv_color_hex(C_TERTIARY), LV_PART_MAIN);
+    lv_obj_set_style_text_color(fav_icon, th_text3(), LV_PART_MAIN);
     lv_label_set_text(fav_icon, HEART_OUTLINE);
     lv_obj_center(fav_icon);
     lv_obj_add_flag(btn_fav, LV_OBJ_FLAG_HIDDEN);   /* shown once a track loads */
@@ -1304,8 +1315,8 @@ void ui_create(lv_obj_t *root)
     lv_label_set_text(mode_icon, MODE_ARROW);
     lv_obj_center(mode_icon);
     mode_one = lv_label_create(btn_mode);
-    lv_obj_set_style_text_font(mode_one, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_set_style_text_color(mode_one, lv_color_hex(C_WHITE), LV_PART_MAIN);
+    lv_obj_set_style_text_font(mode_one, th_font(10), LV_PART_MAIN);
+    lv_obj_set_style_text_color(mode_one, th_text(), LV_PART_MAIN);
     lv_label_set_text(mode_one, "1");
     lv_obj_center(mode_one);   /* sits between the loop arrows */
     lv_obj_add_flag(mode_one, LV_OBJ_FLAG_HIDDEN);
@@ -1313,37 +1324,37 @@ void ui_create(lv_obj_t *root)
 
     title = lv_label_create(scr);
     lv_obj_set_width(title, 260);
-    style_text(title, &s_font20, lv_color_hex(C_WHITE));
+    style_text(title, &s_font20, th_text());
     lv_label_set_long_mode(title, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(title, "No Track");
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 198);
 
     artist = lv_label_create(scr);
     lv_obj_set_width(artist, 238);
-    style_text(artist, &s_font16, lv_color_hex(C_SECONDARY));
+    style_text(artist, &s_font16, th_text2());
     lv_label_set_long_mode(artist, LV_LABEL_LONG_DOT);
     lv_label_set_text(artist, "");
     lv_obj_align(artist, LV_ALIGN_TOP_MID, 0, 226);
 
     album = lv_label_create(scr);
     lv_obj_set_width(album, 218);
-    style_text(album, &s_font14, lv_color_hex(C_TERTIARY));
+    style_text(album, &s_font14, th_text3());
     lv_label_set_long_mode(album, LV_LABEL_LONG_DOT);
     lv_label_set_text(album, "");
     lv_obj_align(album, LV_ALIGN_TOP_MID, 0, 246);
 
     btn_prev = lv_label_create(scr);
-    style_text(btn_prev, &lv_font_montserrat_28, lv_color_hex(C_TERTIARY));
+    style_text(btn_prev, th_font(28), th_text3());
     lv_label_set_text(btn_prev, LV_SYMBOL_PREV);
     lv_obj_align(btn_prev, LV_ALIGN_TOP_MID, -60, 284);
 
     btn_pp = lv_label_create(scr);
-    style_text(btn_pp, &lv_font_montserrat_32, accent);
+    style_text(btn_pp, th_font(32), accent);
     lv_label_set_text(btn_pp, LV_SYMBOL_PLAY);
     lv_obj_align(btn_pp, LV_ALIGN_TOP_MID, 0, 280);
 
     btn_next = lv_label_create(scr);
-    style_text(btn_next, &lv_font_montserrat_28, lv_color_hex(C_TERTIARY));
+    style_text(btn_next, th_font(28), th_text3());
     lv_label_set_text(btn_next, LV_SYMBOL_NEXT);
     lv_obj_align(btn_next, LV_ALIGN_TOP_MID, 60, 284);
 
@@ -1355,18 +1366,18 @@ void ui_create(lv_obj_t *root)
      * arc's bottom gap so they never clash with the green progress fill. */
     t_elapsed = lv_label_create(scr);
     lv_obj_set_width(t_elapsed, 50);
-    style_text(t_elapsed, &lv_font_montserrat_14, lv_color_hex(C_TERTIARY));
+    style_text(t_elapsed, th_font(14), th_text3());
     lv_label_set_text(t_elapsed, "0:00");
     lv_obj_align(t_elapsed, LV_ALIGN_TOP_MID, -40, 318);
 
     lv_obj_t *t_sep = lv_label_create(scr);
-    style_text(t_sep, &lv_font_montserrat_14, lv_color_hex(C_LINE_SOFT));
+    style_text(t_sep, th_font(14), th_card_press());
     lv_label_set_text(t_sep, "/");
     lv_obj_align(t_sep, LV_ALIGN_TOP_MID, 0, 318);
 
     t_remain = lv_label_create(scr);
     lv_obj_set_width(t_remain, 50);
-    style_text(t_remain, &lv_font_montserrat_14, lv_color_hex(C_TERTIARY));
+    style_text(t_remain, th_font(14), th_text3());
     lv_label_set_text(t_remain, "0:00");
     lv_obj_align(t_remain, LV_ALIGN_TOP_MID, 40, 318);
 
@@ -1386,7 +1397,7 @@ void ui_create(lv_obj_t *root)
     lv_obj_remove_style_all(fsart);
     lv_obj_set_size(fsart, 360, 360);
     lv_obj_set_pos(fsart, 0, 0);
-    lv_obj_set_style_bg_color(fsart, lv_color_hex(C_BLACK), 0);
+    lv_obj_set_style_bg_color(fsart, th_bg(), 0);
     lv_obj_set_style_bg_opa(fsart, LV_OPA_COVER, 0);
     lv_obj_add_flag(fsart, LV_OBJ_FLAG_CLICKABLE);          /* tap anywhere -> close */
     lv_obj_clear_flag(fsart, LV_OBJ_FLAG_SCROLLABLE);
@@ -1402,8 +1413,8 @@ void ui_create(lv_obj_t *root)
     lv_obj_remove_style_all(scrim);
     lv_obj_set_size(scrim, 360, 130);
     lv_obj_align(scrim, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(scrim, lv_color_hex(C_BLACK), 0);
-    lv_obj_set_style_bg_grad_color(scrim, lv_color_hex(C_BLACK), 0);
+    lv_obj_set_style_bg_color(scrim, th_bg(), 0);
+    lv_obj_set_style_bg_grad_color(scrim, th_bg(), 0);
     lv_obj_set_style_bg_grad_dir(scrim, LV_GRAD_DIR_VER, 0);
     lv_obj_set_style_bg_main_opa(scrim, LV_OPA_TRANSP, 0);  /* transparent at top */
     lv_obj_set_style_bg_grad_opa(scrim, LV_OPA_80, 0);      /* darker at the bottom */
@@ -1412,7 +1423,7 @@ void ui_create(lv_obj_t *root)
 
     fsart_title = lv_label_create(fsart);
     lv_obj_set_width(fsart_title, 300);
-    style_text(fsart_title, &s_font20, lv_color_hex(C_WHITE));
+    style_text(fsart_title, &s_font20, th_text());
     lv_obj_set_style_text_align(fsart_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(fsart_title, LV_LABEL_LONG_DOT);
     lv_obj_align(fsart_title, LV_ALIGN_BOTTOM_MID, 0, -50);
@@ -1420,7 +1431,7 @@ void ui_create(lv_obj_t *root)
 
     fsart_artist = lv_label_create(fsart);
     lv_obj_set_width(fsart_artist, 280);
-    style_text(fsart_artist, &s_font16, lv_color_hex(C_SECONDARY));
+    style_text(fsart_artist, &s_font16, th_text2());
     lv_obj_set_style_text_align(fsart_artist, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(fsart_artist, LV_LABEL_LONG_DOT);
     lv_obj_align(fsart_artist, LV_ALIGN_BOTTOM_MID, 0, -26);
@@ -1589,7 +1600,7 @@ void ui_show_volume(int vol)
         lv_obj_set_size(g_vol_panel, 200, 200);
         lv_obj_center(g_vol_panel);
         lv_obj_set_style_radius(g_vol_panel, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(g_vol_panel, lv_color_hex(0x000000), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(g_vol_panel, th_bg(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(g_vol_panel, 205, LV_PART_MAIN);
         lv_obj_clear_flag(g_vol_panel, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -1601,8 +1612,8 @@ void ui_show_volume(int vol)
         lv_arc_set_range(g_vol_arc, 0, VOL_MAX);
         lv_obj_set_style_arc_width(g_vol_arc, 10, LV_PART_MAIN);
         lv_obj_set_style_arc_width(g_vol_arc, 10, LV_PART_INDICATOR);
-        lv_obj_set_style_arc_color(g_vol_arc, lv_color_hex(0x3A3A3C), LV_PART_MAIN);
-        lv_obj_set_style_arc_color(g_vol_arc, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(g_vol_arc, th_fill3(), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(g_vol_arc, th_text(), LV_PART_INDICATOR);
         lv_obj_add_event_cb(g_vol_arc, vol_arc_cb, LV_EVENT_VALUE_CHANGED, NULL);
         lv_obj_add_event_cb(g_vol_arc, vol_arc_cb, LV_EVENT_RELEASED, NULL);
         lv_obj_add_event_cb(g_vol_arc, vol_arc_cb, LV_EVENT_PRESS_LOST, NULL);
@@ -1610,12 +1621,12 @@ void ui_show_volume(int vol)
         lv_obj_t *spk = lv_label_create(g_vol_panel);
         lv_label_set_text(spk, LV_SYMBOL_VOLUME_MAX);
         lv_obj_align(spk, LV_ALIGN_CENTER, 0, -22);
-        lv_obj_set_style_text_color(spk, lv_color_hex(0xC7C7CC), LV_PART_MAIN);
+        lv_obj_set_style_text_color(spk, th_text2(), LV_PART_MAIN);
 
         g_vol_num = lv_label_create(g_vol_panel);
         lv_obj_align(g_vol_num, LV_ALIGN_CENTER, 0, 10);
-        lv_obj_set_style_text_font(g_vol_num, &lv_font_montserrat_28, LV_PART_MAIN);
-        lv_obj_set_style_text_color(g_vol_num, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+        lv_obj_set_style_text_font(g_vol_num, th_font(28), LV_PART_MAIN);
+        lv_obj_set_style_text_color(g_vol_num, th_text(), LV_PART_MAIN);
 
         g_vol_timer = lv_timer_create(vol_hide_cb, 1800, NULL);
         lv_timer_pause(g_vol_timer);

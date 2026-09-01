@@ -819,11 +819,15 @@
     #define LV_FREETYPE_CACHE_FT_GLYPH_CNT 256
 #endif
 
-/* Built-in TTF decoder */
-#define LV_USE_TINY_TTF 0
+/* Built-in TTF decoder - powers the user-supplied UI font (Settings -> Display ->
+ * Font): a .ttf/.otf dropped on the SD card replaces Montserrat everywhere. File
+ * support is on because the face is read from the card at runtime, not baked in.
+ * Instances are created lazily per size by theme.c, so the glyph cache below is
+ * paid for only once a custom font is actually selected. */
+#define LV_USE_TINY_TTF 1
 #if LV_USE_TINY_TTF
     /* Enable loading TTF data from files */
-    #define LV_TINY_TTF_FILE_SUPPORT 0
+    #define LV_TINY_TTF_FILE_SUPPORT 1
     #define LV_TINY_TTF_CACHE_GLYPH_CNT 256
 #endif
 

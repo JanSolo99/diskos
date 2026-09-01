@@ -264,13 +264,13 @@ static void relayout(int style)
 
 void saver_create(lv_obj_t *root)
 {
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     g_bg = lv_image_create(root);
     lv_obj_set_size(g_bg, 360, 360);
     lv_obj_align(g_bg, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_image_recolor(g_bg, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_image_recolor(g_bg, th_bg(), 0);
     lv_obj_set_style_image_recolor_opa(g_bg, 185, 0);
     lv_obj_add_flag(g_bg, LV_OBJ_FLAG_HIDDEN);
 
@@ -281,15 +281,15 @@ void saver_create(lv_obj_t *root)
         int big = (i % 3 == 0);
         lv_obj_set_size(d, big ? 8 : 5, big ? 8 : 5);
         lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(d, lv_color_hex(big ? 0xFFFFFF : 0x8E8E93), 0);
+        lv_obj_set_style_bg_color(d, big ? th_text() : th_text3(), 0);
         lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
         double r = i * 30 * 3.14159265 / 180.0;
         int x = (int)(CX + 150 * sin(r)), y = (int)(CY - 150 * cos(r));
         lv_obj_set_pos(d, x - (big?4:2), y - (big?4:2));
         g_tick[i] = d;
     }
-    g_hour = mk_hand(root, 6, lv_color_hex(0xFFFFFF), g_hpts);
-    g_min  = mk_hand(root, 4, lv_color_hex(0xC7C7CC), g_mpts);
+    g_hour = mk_hand(root, 6, th_text(), g_hpts);
+    g_min  = mk_hand(root, 4, th_text2(), g_mpts);
     g_sec  = mk_hand(root, 2, ui_current_accent(), g_spts);
     g_hub  = lv_obj_create(root);
     lv_obj_remove_style_all(g_hub);
@@ -311,14 +311,14 @@ void saver_create(lv_obj_t *root)
     lv_image_set_antialias(g_vinyl, false);   /* pivot + scale set per-cover in saver_set_track */
     lv_obj_add_flag(g_vinyl, LV_OBJ_FLAG_HIDDEN);
 
-    s_swfont = lv_font_montserrat_16;
+    s_swfont = *th_font(16);
     s_swfont.fallback = &font_weather16;
 
-    g_clock   = mk(root, &lv_font_montserrat_40, lv_color_hex(0xFFFFFF), 110);
-    g_date    = mk(root, &lv_font_montserrat_16, lv_color_hex(0xC7C7CC), 170);
-    g_weather = mk(root, &s_swfont,              lv_color_hex(0xC7C7CC), 200);
-    g_track   = mk(root, &lv_font_montserrat_16, lv_color_hex(0xFFFFFF), 254);
-    g_artist  = mk(root, &lv_font_montserrat_14, lv_color_hex(0x8E8E93), 278);
+    g_clock   = mk(root, th_font(40), th_text(), 110);
+    g_date    = mk(root, th_font(16), th_text2(), 170);
+    g_weather = mk(root, &s_swfont,              th_text2(), 200);
+    g_track   = mk(root, th_font(16), th_text(), 254);
+    g_artist  = mk(root, th_font(14), th_text3(), 278);
     lv_label_set_text(g_clock, "--:--");
 
     relayout(cfg_get_int("saver_style", 0));

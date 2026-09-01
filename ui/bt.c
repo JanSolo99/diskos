@@ -68,8 +68,8 @@ static void list_msg(const char *m){
     lv_obj_set_flex_align(g_list, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *e = lv_label_create(g_list);
     lv_label_set_text(e, m);
-    lv_obj_set_style_text_color(e, lv_color_hex(0x8E8E93), 0);
-    lv_obj_set_style_text_font(e, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(e, th_text3(), 0);
+    lv_obj_set_style_text_font(e, th_font(14), 0);
 }
 /* "Scanning" + a spinning refresh glyph, centered in the list area */
 static void list_msg_scanning(void){
@@ -86,14 +86,14 @@ static void list_msg_scanning(void){
     lv_obj_set_style_pad_column(row, 8, 0);
     lv_obj_t *t = lv_label_create(row);
     lv_label_set_text(t, "Scanning");
-    lv_obj_set_style_text_color(t, lv_color_hex(0x8E8E93), 0);
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(t, th_text3(), 0);
+    lv_obj_set_style_text_font(t, th_font(14), 0);
     lv_obj_t *ic = lv_label_create(row);
     lv_label_set_text(ic, LV_SYMBOL_REFRESH);
     lv_obj_set_size(ic, 24, 24);
     lv_obj_set_style_text_align(ic, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(ic, lv_color_hex(0x8E8E93), 0);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ic, th_text3(), 0);
+    lv_obj_set_style_text_font(ic, th_font(14), 0);
     g_scan_icon = ic;
     lv_obj_set_style_transform_pivot_x(ic, lv_pct(50), 0);
     lv_obj_set_style_transform_pivot_y(ic, lv_pct(50), 0);
@@ -324,21 +324,21 @@ static void info_row(const char *key, const char *val){
     lv_obj_remove_style_all(r);
     lv_obj_set_size(r, 250, 40);
     lv_obj_set_style_radius(r, 8, 0);
-    lv_obj_set_style_bg_color(r, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(r, th_card(), 0);
     lv_obj_set_style_bg_opa(r, LV_OPA_50, 0);
     lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *k = lv_label_create(r);
     lv_label_set_text(k, key);
     lv_obj_set_pos(k, 12, 11);
-    lv_obj_set_style_text_font(k, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(k, lv_color_hex(0x8E8E93), 0);
+    lv_obj_set_style_text_font(k, th_font(14), 0);
+    lv_obj_set_style_text_color(k, th_text3(), 0);
     lv_obj_t *v = lv_label_create(r);
     lv_label_set_text(v, val && val[0] ? val : "-");
     lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(v, 96, 11); lv_obj_set_size(v, 142, 18);
     lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_font(v, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(v, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(v, th_font(14), 0);
+    lv_obj_set_style_text_color(v, th_text(), 0);
 }
 static void info_disc_cb(lv_event_t *e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
@@ -353,7 +353,7 @@ static void info_disc_cb(lv_event_t *e){
 static void info_back_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) screen_back(); }
 
 void bt_info_create(lv_obj_t *root){
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     ui_header_cb(root, "Device", info_back_cb);   /* shared header */
     g_info_list = lv_obj_create(root);
@@ -371,14 +371,14 @@ void bt_info_create(lv_obj_t *root){
     lv_obj_remove_style_all(db);
     lv_obj_set_pos(db, 110, 286); lv_obj_set_size(db, 140, 38);
     lv_obj_set_style_radius(db, 12, 0);
-    lv_obj_set_style_bg_color(db, lv_color_hex(0x3A1417), 0);
+    lv_obj_set_style_bg_color(db, lv_color_mix(th_danger(), th_card(), theme_is_light() ? 40 : 60), 0);
     lv_obj_set_style_bg_opa(db, LV_OPA_COVER, 0);
     lv_obj_add_event_cb(db, info_disc_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *dl = lv_label_create(db);
     lv_label_set_text(dl, "Disconnect");
     lv_obj_center(dl);
-    lv_obj_set_style_text_font(dl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(dl, lv_color_hex(0xFF6961), 0);
+    lv_obj_set_style_text_font(dl, th_font(16), 0);
+    lv_obj_set_style_text_color(dl, th_danger(), 0);
 }
 
 void bt_info_open(void){
@@ -427,7 +427,7 @@ static void add_dev_row(const char *mac, const char *name, int connected){
     lv_obj_set_style_radius(r, 8, 0);
     lv_obj_set_style_bg_color(r, lv_color_hex(connected ? 0x0A2A4A : 0x1C1C1E), 0);
     lv_obj_set_style_bg_opa(r, connected ? LV_OPA_COVER : LV_OPA_50, 0);
-    lv_obj_set_style_bg_color(r, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(r, th_card_press(), LV_STATE_PRESSED);
     lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
     char *dup = strdup(mac);
     lv_obj_set_user_data(r, dup);
@@ -439,7 +439,7 @@ static void add_dev_row(const char *mac, const char *name, int connected){
         lv_obj_t *ck = lv_label_create(r);
         lv_label_set_text(ck, LV_SYMBOL_OK);
         lv_obj_set_pos(ck, 12, 15);
-        lv_obj_set_style_text_font(ck, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(ck, th_font(14), 0);
         lv_obj_set_style_text_color(ck, lv_color_hex(0x0A84FF), 0);
         tx = 34;
     }
@@ -447,13 +447,13 @@ static void add_dev_row(const char *mac, const char *name, int connected){
     lv_label_set_text(t, name);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(t, tx, 13); lv_obj_set_size(t, 232 - tx, 20);
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(t, th_font(16), 0);
+    lv_obj_set_style_text_color(t, th_text(), 0);
 
     lv_obj_t *ic = lv_label_create(r);
     lv_label_set_text(ic, LV_SYMBOL_BLUETOOTH);
     lv_obj_set_pos(ic, 252, 14);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ic, th_font(14), 0);
     lv_obj_set_style_text_color(ic, lv_color_hex(connected ? 0x0A84FF : 0x8E8E93), 0);
 }
 
@@ -712,7 +712,7 @@ static void rescan_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED)
 static void back_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) screen_back(); }
 
 void bt_create(lv_obj_t *root){
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     ui_header_cb(root, "Bluetooth", back_cb);   /* shared header */
 
@@ -722,15 +722,15 @@ void bt_create(lv_obj_t *root){
     lv_obj_remove_style_all(trow);
     lv_obj_set_pos(trow, 50, 64); lv_obj_set_size(trow, 208, 48);
     lv_obj_set_style_radius(trow, 12, 0);
-    lv_obj_set_style_bg_color(trow, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(trow, th_card(), 0);
     lv_obj_set_style_bg_opa(trow, LV_OPA_70, 0);
     lv_obj_clear_flag(trow, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *tl = lv_label_create(trow);
     lv_label_set_text(tl, "Bluetooth");
     lv_obj_set_pos(tl, 16, 14);
-    lv_obj_set_style_text_font(tl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(tl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(tl, th_font(16), 0);
+    lv_obj_set_style_text_color(tl, th_text(), 0);
 
     g_sw = lv_switch_create(trow);
     lv_obj_set_size(g_sw, 46, 24);
@@ -743,14 +743,14 @@ void bt_create(lv_obj_t *root){
     lv_obj_set_pos(rb, 266, 72); lv_obj_set_size(rb, 36, 32);
     lv_obj_set_ext_click_area(rb, 8);
     lv_obj_set_style_radius(rb, 10, 0);
-    lv_obj_set_style_bg_color(rb, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(rb, th_card(), 0);
     lv_obj_set_style_bg_opa(rb, LV_OPA_70, 0);
-    lv_obj_set_style_bg_color(rb, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(rb, th_card_press(), LV_STATE_PRESSED);
     lv_obj_add_event_cb(rb, rescan_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *rl = lv_label_create(rb);
     lv_label_set_text(rl, LV_SYMBOL_REFRESH);
-    lv_obj_set_style_text_font(rl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(rl, lv_color_hex(0xC7C7CC), 0);
+    lv_obj_set_style_text_font(rl, th_font(16), 0);
+    lv_obj_set_style_text_color(rl, th_text2(), 0);
     lv_obj_center(rl);
 
     /* Honesty: audio routing to a BT speaker works now (auto-routes on connect), but SBC
@@ -759,8 +759,8 @@ void bt_create(lv_obj_t *root){
     lv_label_set_text(note, "Connect a speaker to play audio (beta)");
     lv_obj_set_pos(note, 30, 113); lv_obj_set_width(note, 300);
     lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(note, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(note, lv_color_hex(0x6E6E73), 0);
+    lv_obj_set_style_text_font(note, th_font(12), 0);
+    lv_obj_set_style_text_color(note, th_text3(), 0);
 
     g_list = lv_obj_create(root);
     lv_obj_remove_style_all(g_list);

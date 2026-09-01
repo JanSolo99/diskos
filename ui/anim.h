@@ -3,6 +3,7 @@
 #ifndef ANIM_H
 #define ANIM_H
 #include "lvgl/lvgl.h"
+#include "theme.h"
 
 /* Reusable animation helpers tuned for the 360x360 software-rendered panel.
  * A global concurrency cap keeps simultaneous value-anims low so FULL-mode

@@ -21,6 +21,7 @@
 #include <sys/stat.h>      /* mkdir() for the SD mount point */
 #include <linux/input.h>   /* EVIOCGKEY / KEY_MAX for the boot-time Vol-Up override */
 #include <net/if.h>
+#include <limits.h>     /* PATH_MAX for the watchdog's /proc/self/exe re-exec */
 #include "lvgl/lvgl.h"
 #include "fb_pan.h"
 #include "screens.h"
@@ -88,7 +89,7 @@ static void dbgdot_init(void){
     lv_obj_set_style_radius(g_dbgdot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(g_dbgdot, lv_color_hex(0x00FF66), 0);
     lv_obj_set_style_bg_opa(g_dbgdot, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(g_dbgdot, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(g_dbgdot, th_text(), 0);
     lv_obj_set_style_border_width(g_dbgdot, 2, 0);
     lv_obj_add_flag(g_dbgdot, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(g_dbgdot, LV_OBJ_FLAG_CLICKABLE);
@@ -117,13 +118,160 @@ void ui_clock_refresh(void){ clock_tick(NULL); }
 /* Status indicators: poll battery (cw221X fuel gauge), wifi (wlan0 has an IP),
  * and bt (any active HCI connection) from sysfs/tools, push to the home row.
  * One short popen on a slow timer - battery/link state changes slowly. */
+/* ---- Bluetooth connection probe (OFF the LVGL thread) ----------------------
+ * There is no sysfs "a device is connected" node for this BT stack, so the only
+ * answer available is `hcitool con`. That used to run as a bare popen() on the
+ * LVGL thread every ~12s - INCLUDING while the screen was off, because the status
+ * poll is deliberately left running at screen-off as an I2C keep-alive.
+ *
+ * popen() is unbounded. When the BT stack wedges (an adapter mid-teardown, a
+ * half-connected headset), hcitool blocks in the kernel and takes the whole UI
+ * thread down with it: no repaint, no touch handling, and - the symptom users
+ * actually reported - a screen that will not wake again until the device is
+ * force-restarted, because the wake path itself lives in that same loop.
+ *
+ * So the probe now runs on a short-lived detached worker, and it is bounded twice
+ * over: the child is killed after PROBE_MS, and only one probe is ever in flight,
+ * so a genuinely stuck hcitool costs one leaked worker rather than the UI. The
+ * LVGL thread only ever reads the published answer. */
+#define BT_PROBE_MS 2500
+static _Atomic int g_bt_conn;        /* last published answer (0/1) */
+static _Atomic int g_bt_probe_busy;  /* 1 while a worker is in flight */
+
+/* Run `hcitool con` with its stdout on a pipe, bounded. 1 = a connection exists. */
+static int btconn_probe_blocking(void)
+{
+    int fds[2];
+    if(pipe(fds) != 0) return 0;
+    pid_t pid = fork();
+    if(pid < 0){ close(fds[0]); close(fds[1]); return 0; }
+    if(pid == 0){
+        setpgid(0, 0);                     /* own group: one kill takes the whole probe */
+        dup2(fds[1], 1);
+        int nul = open("/dev/null", O_RDWR);
+        if(nul >= 0){ dup2(nul, 0); dup2(nul, 2); if(nul > 2) close(nul); }
+        for(int fd = 3; fd < 256; fd++) close(fd);
+        execlp("hcitool", "hcitool", "con", (char*)NULL);
+        _exit(127);
+    }
+    setpgid(pid, pid);
+    close(fds[1]);
+    if(fcntl(fds[0], F_SETFL, O_NONBLOCK) != 0){ /* keep going: the timeout still bounds us */ }
+
+    char buf[512]; int len = 0, found = 0, rc;
+    struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
+    for(;;){
+        int n = (int)read(fds[0], buf + len, (int)sizeof buf - 1 - len);
+        if(n > 0){
+            len += n; buf[len] = 0;
+            if(strstr(buf, "handle")) found = 1;
+            if(len >= (int)sizeof buf - 1) len = 0;   /* only the marker matters; recycle */
+        }
+        int status = 0;
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if(w == pid){ pid = 0; break; }
+        struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
+        long ms = (now.tv_sec - t0.tv_sec)*1000 + (now.tv_nsec - t0.tv_nsec)/1000000;
+        if(ms >= BT_PROBE_MS) break;
+        usleep(20000);
+    }
+    if(pid > 0){                            /* timed out: kill and reap, bounded */
+        kill(-pid, SIGKILL);
+        int status = 0;
+        for(int k = 0; k < 100; k++){ if(waitpid(pid, &status, WNOHANG) == pid) break; usleep(10000); }
+        found = 0;                          /* a wedged stack is not a live connection */
+    }
+    /* drain whatever the child wrote before exiting */
+    while((rc = (int)read(fds[0], buf, sizeof buf - 1)) > 0){ buf[rc] = 0; if(strstr(buf, "handle")) found = 1; }
+    close(fds[0]);
+    return found;
+}
+static void *btconn_worker(void *arg)
+{
+    (void)arg;
+    atomic_store(&g_bt_conn, btconn_probe_blocking());
+    atomic_store(&g_bt_probe_busy, 0);
+    return NULL;
+}
+static void btconn_probe_request(void)
+{
+    int expected = 0;
+    if(!atomic_compare_exchange_strong(&g_bt_probe_busy, &expected, 1)) return;  /* one at a time */
+    pthread_t th;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&at, 64*1024);
+    if(pthread_create(&th, &at, btconn_worker, NULL) != 0) atomic_store(&g_bt_probe_busy, 0);
+    pthread_attr_destroy(&at);
+}
+static int btconn_get(void){ return atomic_load(&g_bt_conn); }
+
+/* ---- UI liveness watchdog --------------------------------------------------
+ * Belt and braces for the same class of failure. The main loop stamps a heartbeat
+ * every iteration - even in deep idle it runs ~30x/s - so a heartbeat that has not
+ * moved for WATCHDOG_MS means the LVGL thread is genuinely stuck, not merely idle.
+ * The screen is then unwakeable by touch (the wake path is in that loop), which is
+ * exactly the "won't wake up, had to force restart it" report.
+ *
+ * Rather than leave the user holding the power button, re-exec ourselves. Only the
+ * UI restarts: mq_player keeps the music and the SD card, which is the one thing
+ * that must never be interrupted on this device (killing it hard-reboots the Disc).
+ * Same PID, so anything supervising us is undisturbed. */
+#define WATCHDOG_MS 45000
+static _Atomic uint32_t g_heartbeat;
+/* Launching an external app deliberately blocks the LVGL loop for as long as the app
+ * runs (it owns the framebuffer meanwhile), which is indistinguishable from a stall.
+ * Suspend the watchdog for the duration so a long-running app is never mistaken for
+ * a hang - the one legitimate reason the heartbeat stops. */
+static _Atomic int g_watchdog_paused;
+static void watchdog_pause(int on){
+    atomic_store(&g_watchdog_paused, on ? 1 : 0);
+    if(!on) atomic_store(&g_heartbeat, lv_tick_get());   /* fresh stamp on resume */
+}
+static void *ui_watchdog(void *arg)
+{
+    (void)arg;
+    for(;;){
+        sleep(5);
+        if(atomic_load(&g_watchdog_paused)) continue;
+        uint32_t hb = atomic_load(&g_heartbeat);
+        if(hb == 0) continue;                       /* main loop hasn't started stamping yet */
+        uint32_t age = lv_tick_elaps(hb);
+        if(age < WATCHDOG_MS) continue;
+        fprintf(stderr, "WATCHDOG: UI thread stalled %ums - restarting mq_ui\n", age);
+        fflush(stderr);
+        char self[PATH_MAX];
+        ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+        if(n > 0){
+            self[n] = 0;
+            char *av[] = { self, NULL };
+            execv(self, av);                        /* same pid; player untouched */
+        }
+        /* exec failed - keep watching rather than exiting (exiting would leave the
+         * user with no UI at all, which is strictly worse than a frozen one). */
+        atomic_store(&g_heartbeat, lv_tick_get());
+    }
+    return NULL;
+}
+static void ui_watchdog_start(void)
+{
+    pthread_t th;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&at, 64*1024);
+    pthread_create(&th, &at, ui_watchdog, NULL);
+    pthread_attr_destroy(&at);
+}
+
 /* battery + wifi read directly (no shell spawn); only BT keeps a light call since the
  * device exposes no sysfs connection indicator and the HCI ioctl layout is fragile. */
 static void status_poll_cb(lv_timer_t *t){
     (void)t;
     /* Runs on the fast (3s) timer so charging/battery/wifi track plug/unplug promptly. The BT check
      * is the one shell spawn (hcitool), so it runs only every 4th tick (~12s) and caches otherwise. */
-    static int bt_cached = 0, tick = 0;
+    static int bt_cached = 0, tick = 0;   /* bt_cached mirrors the worker's last answer */
     int batt = -1, charging = 0, wifi = 0, bt;
 
     FILE *bf = fopen("/sys/class/power_supply/cw221X-bat/capacity", "r");
@@ -155,13 +303,8 @@ static void status_poll_cb(lv_timer_t *t){
         wifi = (strncmp(op, "up", 2) == 0);
     }
 
-    if(tick++ % 4 == 0){                                   /* refresh BT only every ~12s (spawn) */
-        bt_cached = 0;
-        FILE *pf = popen("hcitool con 2>/dev/null", "r");
-        if(pf){ char line[256]; while(fgets(line, sizeof line, pf)){
-                    if(strstr(line, "handle")){ bt_cached = 1; break; } } pclose(pf); }
-    }
-    bt = bt_cached;
+    if(tick++ % 4 == 0) btconn_probe_request();   /* refresh BT ~every 12s, OFF this thread */
+    bt = bt_cached = btconn_get();
 
     home_set_status(batt, charging, wifi, bt);
 }
@@ -594,6 +737,7 @@ static void app_run(const char *exec){
         return;
     }
     int failed = 0;
+    watchdog_pause(1);          /* the app owns the screen + this thread until it exits */
     pid_t pid = fork();
     if(pid == 0){
         execl(exec, exec, (char*)NULL);
@@ -605,6 +749,7 @@ static void app_run(const char *exec){
     } else {
         failed = 1;  /* fork failed */
     }
+    watchdog_pause(0);
     /* reclaim the screen: invalidate everything and force an immediate redraw */
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(NULL);
@@ -887,7 +1032,7 @@ static void boot_splash_start(void){
     lv_obj_remove_style_all(s_splash);
     lv_obj_set_size(s_splash, 360, 360);
     lv_obj_set_pos(s_splash, 0, 0);
-    lv_obj_set_style_bg_color(s_splash, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(s_splash, th_bg(), 0);
     lv_obj_set_style_bg_opa(s_splash, LV_OPA_COVER, 0);
     lv_obj_add_flag(s_splash, LV_OBJ_FLAG_CLICKABLE);       /* swallow taps during the splash */
     lv_obj_clear_flag(s_splash, LV_OBJ_FLAG_SCROLLABLE);
@@ -915,8 +1060,8 @@ static void boot_splash_start(void){
     lv_label_set_text(w, "diskOS");
     lv_obj_set_width(w, 360);
     lv_obj_set_style_text_align(w, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(w, &lv_font_montserrat_36, 0);
-    lv_obj_set_style_text_color(w, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(w, th_font(36), 0);
+    lv_obj_set_style_text_color(w, th_text(), 0);
     lv_obj_set_pos(w, 0, 172);                             /* rises to 160, ring-centred */
     lv_obj_set_style_opa(w, LV_OPA_TRANSP, 0);
 
@@ -1202,6 +1347,11 @@ int main(int argc, char **argv){
         fprintf(stderr,"fbpan try %d failed, retry\n",i); fflush(stderr); usleep(250000); }
     if(!fbok){ fprintf(stderr,"fbpan failed (gave up)\n"); return 1; }
     cfg_load();
+    /* Theme + font come straight after cfg_load and BEFORE anything paints: every
+     * screen reads its colours and faces from these at create time, so they must be
+     * resolved before screens_init() builds the widget tree. */
+    theme_init();
+    theme_font_init();
     swipe_thresh_load();
     settings_apply_startup();   /* restore saved brightness */
     wifi_init_intent();         /* seed wifi_on intent from stock WIFI_STATUS (first run only) */
@@ -1232,6 +1382,9 @@ int main(int argc, char **argv){
      * caching" setting (off/idle/charging) + a battery-temp throttle, so it's safe to
      * always spawn - it just sleeps while disabled or while the player is warm. */
     ui_start_art_prewarm();
+    /* Armed only once the UI is fully up, so a slow boot can never trip it. */
+    atomic_store(&g_heartbeat, lv_tick_get());
+    ui_watchdog_start();
     /* Try to connect now; if the player's /ui queue isn't up yet (cold boot),
      * keep retrying in the background so the UI still comes up immediately. */
     if(ipc_start()!=0){
@@ -1463,6 +1616,7 @@ int main(int argc, char **argv){
             if(cfg_take_save_error())       ui_toast("Couldn't save settings");
             else if(ipc_take_send_error())  ui_toast("Player didn't respond");
         }
+        atomic_store(&g_heartbeat, lv_tick_get());   /* watchdog liveness stamp (see ui_watchdog) */
         uint32_t wait = lv_timer_handler();
         /* (boot watchdog was already disarmed before the loop, after the first frame
          * actually painted - see lv_refr_now above.) */

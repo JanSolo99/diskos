@@ -236,39 +236,39 @@ static lv_obj_t *wapp_btn(lv_obj_t *root, int y, const char *label, lv_event_cb_
     lv_obj_remove_style_all(b);
     lv_obj_set_pos(b, 50, y); lv_obj_set_size(b, 260, 52);
     lv_obj_set_style_radius(b, 26, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(b, th_card(), 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_70, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b, th_card_press(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, label);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
+    lv_obj_set_style_text_color(l, th_text(), 0);
     lv_obj_center(l);
     return b;
 }
 
 void weather_app_create(lv_obj_t *root)
 {
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     ui_header(root, "Weather");   /* shared standard header */
 
-    s_appwfont = lv_font_montserrat_22;
+    s_appwfont = *th_font(22);
     s_appwfont.fallback = &font_weather16;
     g_app_w = lv_label_create(root);
     lv_obj_set_pos(g_app_w, 0, 96); lv_obj_set_width(g_app_w, 360);
     lv_obj_set_style_text_align(g_app_w, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(g_app_w, &s_appwfont, 0);
-    lv_obj_set_style_text_color(g_app_w, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(g_app_w, th_text(), 0);
 
     g_app_loc = lv_label_create(root);
     lv_obj_set_pos(g_app_loc, 0, 140); lv_obj_set_width(g_app_loc, 360);
     lv_obj_set_style_text_align(g_app_loc, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(g_app_loc, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(g_app_loc, lv_color_hex(0x8E8E93), 0);
+    lv_obj_set_style_text_font(g_app_loc, th_font(14), 0);
+    lv_obj_set_style_text_color(g_app_loc, th_text3(), 0);
 
     wapp_btn(root, 186, "Set Location", set_loc_cb);
     wapp_btn(root, 248, "Auto (by IP)", auto_loc_cb);

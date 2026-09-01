@@ -101,7 +101,7 @@ static void make_col(lv_obj_t *parent, int idx, const char *flabel, const char *
     lv_obj_t *val = lv_label_create(col);
     lv_obj_set_pos(val, 0, 0); lv_obj_set_width(val, 42);
     lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(val, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(val, th_font(14), 0);
     lv_obj_set_style_text_color(val, lv_color_hex(ACC), 0);
 
     lv_obj_t *sl = lv_slider_create(col);
@@ -112,9 +112,9 @@ static void make_col(lv_obj_t *parent, int idx, const char *flabel, const char *
     lv_slider_set_range(sl, -12, 12);
     int cv = cfg_get_int(cfgkey, 0);
     lv_slider_set_value(sl, cv, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(sl, lv_color_hex(0x2C2C2E), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sl, th_card_press(), LV_PART_MAIN);
     lv_obj_set_style_bg_color(sl, lv_color_hex(ACC), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(sl, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+    lv_obj_set_style_bg_color(sl, th_text(), LV_PART_KNOB);
     lv_obj_add_event_cb(sl, band_cb, LV_EVENT_VALUE_CHANGED, (void*)(intptr_t)idx);
     lv_obj_add_event_cb(sl, band_release_cb, LV_EVENT_RELEASED, (void*)(intptr_t)idx);
     lv_obj_add_event_cb(sl, band_release_cb, LV_EVENT_PRESS_LOST, (void*)(intptr_t)idx);
@@ -125,7 +125,7 @@ static void make_col(lv_obj_t *parent, int idx, const char *flabel, const char *
     lv_obj_set_pos(fl, 0, 182); lv_obj_set_width(fl, 42);
     lv_label_set_text(fl, flabel);
     lv_obj_set_style_text_align(fl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(fl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(fl, th_font(14), 0);
     lv_obj_set_style_text_color(fl, lv_color_hex(idx==NBAND ? 0xC7C7CC : 0x8E8E93), 0);
 
     *slot_slider = sl;
@@ -133,7 +133,7 @@ static void make_col(lv_obj_t *parent, int idx, const char *flabel, const char *
 }
 
 void eqcustom_create(lv_obj_t *root){
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     ui_header(root, "Custom EQ");   /* shared standard header */
@@ -142,8 +142,8 @@ void eqcustom_create(lv_obj_t *root){
     lv_label_set_text(hint, "Swipe sideways for more bands");
     lv_obj_set_pos(hint, 20, 58); lv_obj_set_width(hint, 320);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(hint, lv_color_hex(0x8E8E93), 0);
+    lv_obj_set_style_text_font(hint, th_font(14), 0);
+    lv_obj_set_style_text_color(hint, th_text3(), 0);
 
     /* horizontally-scrollable row of EQ columns (master + 10 bands) */
     lv_obj_t *scr = lv_obj_create(root);
@@ -167,11 +167,11 @@ void eqcustom_create(lv_obj_t *root){
     lv_obj_remove_style_all(flat);
     lv_obj_set_size(flat, 120, 34); lv_obj_align(flat, LV_ALIGN_TOP_MID, 0, 296);
     lv_obj_set_style_radius(flat, 17, 0);
-    lv_obj_set_style_bg_color(flat, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(flat, th_card(), 0);
     lv_obj_set_style_bg_opa(flat, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(flat, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(flat, th_card_press(), LV_STATE_PRESSED);
     lv_obj_add_event_cb(flat, flat_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *fll=lv_label_create(flat); lv_label_set_text(fll, "Flat");
-    lv_obj_set_style_text_font(fll, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(fll, lv_color_hex(0xFFFFFF), 0); lv_obj_center(fll);
+    lv_obj_set_style_text_font(fll, th_font(14), 0);
+    lv_obj_set_style_text_color(fll, th_text(), 0); lv_obj_center(fll);
 }

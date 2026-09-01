@@ -54,8 +54,8 @@ static void plv_reload(void){
         free(songs);   /* NULL-safe */
         lv_obj_t *l = lv_label_create(g_song_list);
         lv_label_set_text(l, "Empty playlist\nAdd songs from Now Playing");
-        lv_obj_set_style_text_color(l, lv_color_hex(0x8E8E93), 0);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(l, th_text3(), 0);
+        lv_obj_set_style_text_font(l, th_font(14), 0);
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
         return;
     }
@@ -64,7 +64,7 @@ static void plv_reload(void){
         lv_obj_remove_style_all(r);
         lv_obj_set_size(r, 280, 46);
         lv_obj_set_style_radius(r, 8, 0);
-        lv_obj_set_style_bg_color(r, lv_color_hex(0x1C1C1E), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(r, th_card(), LV_STATE_PRESSED);
         lv_obj_set_style_bg_opa(r, LV_OPA_70, LV_STATE_PRESSED);
         lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_event_cb(r, plv_song_cb, LV_EVENT_CLICKED, (void*)(intptr_t)(i+1));
@@ -73,13 +73,13 @@ static void plv_reload(void){
         lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
         lv_obj_set_pos(t, 12, 5); lv_obj_set_size(t, 256, 19);
         lv_obj_set_style_text_font(t, ui_font_cjk(16), 0);   /* CJK titles like Library/Search */
-        lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(t, th_text(), 0);
         lv_obj_t *a = lv_label_create(r);
         lv_label_set_text(a, songs[i].artist);
         lv_label_set_long_mode(a, LV_LABEL_LONG_DOT);
         lv_obj_set_pos(a, 12, 25); lv_obj_set_size(a, 256, 16);
         lv_obj_set_style_text_font(a, ui_font_cjk(14), 0);
-        lv_obj_set_style_text_color(a, lv_color_hex(0xC7C7CC), 0);
+        lv_obj_set_style_text_color(a, th_text2(), 0);
     }
     free(songs);
 }
@@ -136,7 +136,7 @@ static lv_obj_t *card(int w, int h){
     lv_obj_remove_style_all(bg);
     lv_obj_set_size(bg, 360, 360);
     lv_obj_center(bg);
-    lv_obj_set_style_bg_color(bg, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(bg, th_bg(), 0);
     lv_obj_set_style_bg_opa(bg, LV_OPA_50, 0);
     lv_obj_clear_flag(bg, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(bg, LV_OBJ_FLAG_CLICKABLE);
@@ -146,10 +146,10 @@ static lv_obj_t *card(int w, int h){
     lv_obj_set_size(c, w, h);
     lv_obj_center(c);
     lv_obj_set_style_radius(c, 16, 0);
-    lv_obj_set_style_bg_color(c, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(c, th_card(), 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(c, 1, 0);
-    lv_obj_set_style_border_color(c, lv_color_hex(0x2C2C2E), 0);
+    lv_obj_set_style_border_color(c, th_card_press(), 0);
     lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     return c;
 }
@@ -164,7 +164,7 @@ static lv_obj_t *card_btn(lv_obj_t *p, int y, int w, const char *txt, lv_color_t
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, txt);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
     lv_obj_set_style_text_color(l, fg, 0);
     lv_obj_center(l);
     return b;
@@ -174,16 +174,16 @@ static void show_delete_confirm(void){
     lv_obj_t *dc = card(264, 200);   /* card() sets g_dialog = the full-screen backdrop; content goes on dc */
     lv_obj_t *t = lv_label_create(dc);
     lv_label_set_text(t, "Delete playlist?");
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(t, th_font(20), 0);
+    lv_obj_set_style_text_color(t, th_text(), 0);
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 26);
     lv_obj_t *s = lv_label_create(dc);
     lv_label_set_text(s, "The songs are kept.");
-    lv_obj_set_style_text_font(s, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(s, lv_color_hex(0x8E8E93), 0);
+    lv_obj_set_style_text_font(s, th_font(14), 0);
+    lv_obj_set_style_text_color(s, th_text3(), 0);
     lv_obj_align(s, LV_ALIGN_TOP_MID, 0, 54);
-    card_btn(dc, 88,  200, "Delete", lv_color_hex(0x3A1416), lv_color_hex(0xFF453A), del_yes_cb);
-    card_btn(dc, 134, 200, "Cancel", lv_color_hex(0x2C2C2E), lv_color_hex(0xFFFFFF), del_no_cb);
+    card_btn(dc, 88,  200, "Delete", lv_color_mix(th_danger(), th_card(), theme_is_light() ? 40 : 60), th_danger(), del_yes_cb);
+    card_btn(dc, 134, 200, "Cancel", th_card_press(), th_text(), del_no_cb);
 }
 
 /* ---- rename ------------------------------------------------------------- */
@@ -215,7 +215,7 @@ static void open_menu_cb(lv_event_t *e){
     lv_obj_remove_style_all(g_menu);
     lv_obj_set_size(g_menu, 360, 360);
     lv_obj_center(g_menu);
-    lv_obj_set_style_bg_color(g_menu, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(g_menu, th_bg(), 0);
     lv_obj_set_style_bg_opa(g_menu, LV_OPA_50, 0);
     lv_obj_add_flag(g_menu, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(g_menu, menu_dismiss_cb, LV_EVENT_CLICKED, NULL);
@@ -224,11 +224,11 @@ static void open_menu_cb(lv_event_t *e){
     lv_obj_set_size(c, 240, 124);
     lv_obj_center(c);
     lv_obj_set_style_radius(c, 16, 0);
-    lv_obj_set_style_bg_color(c, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(c, th_card(), 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
-    card_btn(c, 12, 216, "Edit Name",       lv_color_hex(0x2C2C2E), lv_color_hex(0xFFFFFF), rename_cb);
-    card_btn(c, 64, 216, "Delete Playlist", lv_color_hex(0x2C2C2E), lv_color_hex(0xFF453A), del_menu_cb);
+    card_btn(c, 12, 216, "Edit Name",       th_card_press(), th_text(), rename_cb);
+    card_btn(c, 64, 216, "Delete Playlist", th_card_press(), th_danger(), del_menu_cb);
 }
 
 static void back_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) screen_back(); }
@@ -242,9 +242,9 @@ static lv_obj_t *icon_btn(lv_obj_t *root, int x, int y, int w, const char *sym,
     lv_obj_set_size(b, w, 40);
     lv_obj_set_ext_click_area(b, 6);   /* easier hit, esp. the 36px menu button */
     lv_obj_set_style_radius(b, 14, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(b, th_card(), 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b, th_card_press(), LV_STATE_PRESSED);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, sym);
@@ -253,7 +253,7 @@ static lv_obj_t *icon_btn(lv_obj_t *root, int x, int y, int w, const char *sym,
     return b;
 }
 void plview_create(lv_obj_t *root){
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     g_title_lbl = ui_header_cb(root, "Playlist", back_cb);   /* shared header; dynamic title = playlist name */
@@ -261,18 +261,18 @@ void plview_create(lv_obj_t *root){
     lv_obj_align(g_title_lbl, LV_ALIGN_TOP_MID, 0, 30);
 
     /* Play / Shuffle / 3-dots row */
-    g_play_btn    = icon_btn(root, 62,  68, 96, LV_SYMBOL_PLAY "  Play",   lv_color_hex(0x34C759), play_cb);
-    g_shuffle_btn = icon_btn(root, 164, 68, 96, LV_SYMBOL_SHUFFLE "  Shuffle", lv_color_hex(0xFFFFFF), shuffle_cb);
+    g_play_btn    = icon_btn(root, 62,  68, 96, LV_SYMBOL_PLAY "  Play",   th_ok(), play_cb);
+    g_shuffle_btn = icon_btn(root, 164, 68, 96, LV_SYMBOL_SHUFFLE "  Shuffle", th_text(), shuffle_cb);
     /* "more/options" (edit/rename/delete). Drawn "•••" - Apple-Music-style More - because the
      * bullet glyph isn't in this tree's montserrat; LV_SYMBOL_LIST misread as a track list. */
-    lv_obj_t *menu_btn = icon_btn(root, 266, 68, 36, "", lv_color_hex(0xC7C7CC), open_menu_cb);
+    lv_obj_t *menu_btn = icon_btn(root, 266, 68, 36, "", th_text2(), open_menu_cb);
     for(int i=0;i<3;i++){
         lv_obj_t *d = lv_obj_create(menu_btn);
         lv_obj_remove_style_all(d);
         lv_obj_clear_flag(d, LV_OBJ_FLAG_CLICKABLE);   /* decorative: let taps fall through to the button */
         lv_obj_set_size(d, 4, 4);
         lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(d, lv_color_hex(0xC7C7CC), 0);
+        lv_obj_set_style_bg_color(d, th_text2(), 0);
         lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
         lv_obj_align(d, LV_ALIGN_CENTER, (i-1)*7, 0);   /* -7 / 0 / +7 px */
     }

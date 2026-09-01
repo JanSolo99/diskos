@@ -42,7 +42,7 @@ static lv_obj_t *body_button(const char *txt, lv_event_cb_t cb){
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, txt);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(l, th_font(18), 0);
     lv_obj_center(l);
     return b;
 }
@@ -71,7 +71,7 @@ static void rebuild(void){
 
     if(lastfm_connected()){
         char b[180]; snprintf(b, sizeof b, "Connected as\n%s", lastfm_username());
-        body_label(b, &lv_font_montserrat_20, 0xFFFFFF);
+        body_label(b, th_font(20), 0xFFFFFF);
         /* Scrobbling on/off */
         lv_obj_t *row = lv_obj_create(g_body);
         lv_obj_remove_style_all(row); lv_obj_set_size(row, 210, 40);
@@ -79,44 +79,44 @@ static void rebuild(void){
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_t *rl = lv_label_create(row);
         lv_label_set_text(rl, "Scrobbling");
-        lv_obj_set_style_text_font(rl, &lv_font_montserrat_18, 0);
-        lv_obj_set_style_text_color(rl, lv_color_hex(0xC7C7CC), 0);
+        lv_obj_set_style_text_font(rl, th_font(18), 0);
+        lv_obj_set_style_text_color(rl, th_text2(), 0);
         lv_obj_t *sw = lv_switch_create(row);
         if(lastfm_enabled()) lv_obj_add_state(sw, LV_STATE_CHECKED);
         lv_obj_set_style_bg_color(sw, lv_color_hex(0xD51007), LV_PART_INDICATOR | LV_STATE_CHECKED);
         lv_obj_add_event_cb(sw, on_toggle, LV_EVENT_VALUE_CHANGED, NULL);
         int q = lastfm_queue_count();
         if(q > 0){ char qb[48]; snprintf(qb,sizeof qb,"%d scrobble%s queued", q, q==1?"":"s");
-                   body_label(qb, &lv_font_montserrat_14, 0x8E8E93); }
+                   body_label(qb, th_font(14), 0x8E8E93); }
         body_button("Disconnect", on_disconnect);
     }
     else if(st==LFM_AUTH_WAIT && lastfm_auth_url()[0]){
-        body_label("Scan, then tap \"Allow\"\non last.fm", &lv_font_montserrat_18, 0xFFFFFF);
+        body_label("Scan, then tap \"Allow\"\non last.fm", th_font(18), 0xFFFFFF);
         body_qr(lastfm_auth_url());
-        body_label("Waiting for approval...", &lv_font_montserrat_14, 0x8E8E93);
+        body_label("Waiting for approval...", th_font(14), 0x8E8E93);
     }
     else if(st==LFM_AUTH_TOKEN){
-        body_label("Connecting...", &lv_font_montserrat_20, 0xFFFFFF);
+        body_label("Connecting...", th_font(20), 0xFFFFFF);
     }
     else if(lastfm_setup_url()[0]){
-        body_label("Scan with your phone\nto enter your Last.fm key", &lv_font_montserrat_18, 0xFFFFFF);
+        body_label("Scan with your phone\nto enter your Last.fm key", th_font(18), 0xFFFFFF);
         body_qr(lastfm_setup_url());
-        body_label("Same Wi-Fi as this player", &lv_font_montserrat_14, 0x8E8E93);
+        body_label("Same Wi-Fi as this player", th_font(14), 0x8E8E93);
     }
     else if(st==LFM_AUTH_ERR){
-        body_label("Couldn't connect.\nTry again.", &lv_font_montserrat_18, 0xFFFFFF);
+        body_label("Couldn't connect.\nTry again.", th_font(18), 0xFFFFFF);
         body_button(lastfm_has_creds()?"Retry":"Set up", lastfm_has_creds()?on_connect:on_setup);
     }
     else if(lastfm_has_creds()){
-        body_label("Authorize this player\non your Last.fm account", &lv_font_montserrat_18, 0xFFFFFF);
+        body_label("Authorize this player\non your Last.fm account", th_font(18), 0xFFFFFF);
         body_button("Connect account", on_connect);
         body_button("Re-enter keys", on_setup);
     }
     else {
-        body_label("Scrobble the songs you play\nto your Last.fm profile", &lv_font_montserrat_18, 0xFFFFFF);
+        body_label("Scrobble the songs you play\nto your Last.fm profile", th_font(18), 0xFFFFFF);
         body_button("Set up", on_setup);
         body_label("Beta: connect flow not fully\ntested yet. Key setup uses your\nlocal Wi-Fi (plain HTTP).",
-                   &lv_font_montserrat_14, 0x8E8E93);
+                   th_font(14), 0x8E8E93);
     }
 }
 

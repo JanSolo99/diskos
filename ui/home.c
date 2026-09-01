@@ -15,7 +15,7 @@ static lv_font_t s_wfont;   /* montserrat_14 with the weather-icon font as fallb
 static lv_obj_t *g_clock;
 static lv_obj_t *g_clock_sub;
 static lv_obj_t *g_home_bg;      /* full-screen blurred album backdrop (matches Now Playing) */
-static lv_obj_t *g_home_scrim;   /* dark overlay over the backdrop so text stays readable */
+static lv_obj_t *g_home_scrim;   /* theme-ground veil over the backdrop so text stays readable */
 static lv_obj_t *g_status;       /* top status row: wifi / bt / battery */
 static lv_obj_t *g_weather;      /* weather line under the date */
 static lv_obj_t *g_status_arc;
@@ -81,23 +81,23 @@ static lv_obj_t *make_tile(lv_obj_t *parent, int x, int y, int w, const char *sy
     lv_obj_set_pos(btn, x, y);
     lv_obj_set_size(btn, w, 92);
     lv_obj_set_style_radius(btn, 22, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(btn, th_card(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_70, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, th_card_press(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(btn, th_text(), 0);
     lv_obj_set_style_border_opa(btn, LV_OPA_10, 0);
     lv_obj_set_style_border_width(btn, 1, 0);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
 
-    lv_obj_t *ic = make_label(btn, symbol, &lv_font_montserrat_24,
-                              lv_color_hex(0xFFFFFF));
+    lv_obj_t *ic = make_label(btn, symbol, th_font(24),
+                              th_text());
     lv_obj_set_pos(ic, 0, 18);
     lv_obj_set_width(ic, w);
 
-    lv_obj_t *title = make_label(btn, text, &lv_font_montserrat_16,
-                                 lv_color_hex(0xFFFFFF));
+    lv_obj_t *title = make_label(btn, text, th_font(16),
+                                 th_text());
     lv_obj_set_pos(title, 0, 54);
     lv_obj_set_width(title, w);
 
@@ -114,11 +114,11 @@ static lv_obj_t *make_pill(lv_obj_t *parent, int x, int y, int w, int h,
     lv_obj_set_pos(btn, x, y);
     lv_obj_set_size(btn, w, h);
     lv_obj_set_style_radius(btn, h / 2, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(btn, th_card(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_70, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, th_card_press(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(btn, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(btn, th_text(), 0);
     lv_obj_set_style_border_opa(btn, LV_OPA_10, 0);
     lv_obj_set_style_border_width(btn, 1, 0);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
@@ -126,14 +126,14 @@ static lv_obj_t *make_pill(lv_obj_t *parent, int x, int y, int w, int h,
 
     lv_obj_t *ic = lv_label_create(btn);
     lv_label_set_text(ic, symbol);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_text_color(ic, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(ic, th_font(24), 0);
+    lv_obj_set_style_text_color(ic, th_text(), 0);
     lv_obj_align(ic, LV_ALIGN_LEFT_MID, 30, 0);
 
     lv_obj_t *title = lv_label_create(btn);
     lv_label_set_text(title, text);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(title, th_font(18), 0);
+    lv_obj_set_style_text_color(title, th_text(), 0);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 76, 0);
     return btn;
 }
@@ -228,7 +228,7 @@ void home_create(lv_obj_t *root)
 {
     g_accent = lv_color_hex(0xF23260);
 
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     /* full-screen blurred album backdrop (same image Now Playing uses), behind everything;
@@ -241,33 +241,33 @@ void home_create(lv_obj_t *root)
     g_home_scrim = lv_obj_create(root);
     lv_obj_remove_style_all(g_home_scrim);
     lv_obj_set_pos(g_home_scrim, 0, 0); lv_obj_set_size(g_home_scrim, 360, 360);
-    lv_obj_set_style_bg_color(g_home_scrim, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(g_home_scrim, LV_OPA_50, 0);
+    lv_obj_set_style_bg_color(g_home_scrim, th_bg(), 0);
+    lv_obj_set_style_bg_opa(g_home_scrim, th_scrim_opa(), 0);   /* light mode needs a heavier veil (see theme.c) */
     lv_obj_clear_flag(g_home_scrim, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(g_home_scrim, LV_OBJ_FLAG_HIDDEN);
 
     g_status_arc = NULL;   /* decorative status arc removed (read as a stray progress line) */
 
     /* Top status row: wifi / bt / battery (populated by main.c poll). */
-    g_status = make_label(root, "", &lv_font_montserrat_14, lv_color_hex(0xC7C7CC));
+    g_status = make_label(root, "", th_font(14), th_text2());
     lv_obj_set_pos(g_status, 0, 18);
     lv_obj_set_width(g_status, 360);
 
-    g_clock = make_label(root, "--:--", &lv_font_montserrat_28,
-                         lv_color_hex(0xFFFFFF));
+    g_clock = make_label(root, "--:--", th_font(28),
+                         th_text());
     lv_obj_set_pos(g_clock, 0, 52);
     lv_obj_set_width(g_clock, 360);
 
-    g_clock_sub = make_label(root, "diskOS", &lv_font_montserrat_14,
-                             lv_color_hex(0x8E8E93));
+    g_clock_sub = make_label(root, "diskOS", th_font(14),
+                             th_text3());
     lv_obj_set_pos(g_clock_sub, 0, 88);
     lv_obj_set_width(g_clock_sub, 360);
 
     /* Weather line (populated by weather.c via wttr.in). Uses montserrat_14 with
      * the FA weather-icon font chained as fallback so the icon glyph renders. */
-    s_wfont = lv_font_montserrat_14;
+    s_wfont = *th_font(14);
     s_wfont.fallback = &font_weather16;
-    g_weather = make_label(root, "", &s_wfont, lv_color_hex(0xC7C7CC));
+    g_weather = make_label(root, "", &s_wfont, th_text2());
     lv_obj_set_pos(g_weather, 0, 120);
     lv_obj_set_width(g_weather, 360);
     lv_label_set_long_mode(g_weather, LV_LABEL_LONG_DOT);
@@ -282,7 +282,7 @@ void home_create(lv_obj_t *root)
     lv_obj_set_size(sbtn, 44, 44);
     lv_obj_set_ext_click_area(sbtn, 8);
     lv_obj_set_style_radius(sbtn, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(sbtn, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(sbtn, th_card_press(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(sbtn, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_event_cb(sbtn, nav_event_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)SCR_SEARCH);
     lv_obj_t *ring = lv_obj_create(sbtn);
@@ -291,12 +291,12 @@ void home_create(lv_obj_t *root)
     lv_obj_set_pos(ring, 11, 9);
     lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(ring, 2, 0);
-    lv_obj_set_style_border_color(ring, lv_color_hex(0xC7C7CC), 0);
+    lv_obj_set_style_border_color(ring, th_text2(), 0);
     lv_obj_t *handle = lv_obj_create(sbtn);
     lv_obj_remove_style_all(handle);
     lv_obj_set_size(handle, 8, 2);
     lv_obj_set_pos(handle, 25, 25);
-    lv_obj_set_style_bg_color(handle, lv_color_hex(0xC7C7CC), 0);
+    lv_obj_set_style_bg_color(handle, th_text2(), 0);
     lv_obj_set_style_bg_opa(handle, LV_OPA_COVER, 0);
     lv_obj_set_style_transform_rotation(handle, 450, 0);
 
@@ -306,8 +306,8 @@ void home_create(lv_obj_t *root)
               nav_event_cb, (void *)(uintptr_t)SCR_LIBRARY);
 
     /* subtle hint that swiping left reveals more */
-    lv_obj_t *hint = make_label(root, LV_SYMBOL_RIGHT, &lv_font_montserrat_14,
-                                lv_color_hex(0x48484A));
+    lv_obj_t *hint = make_label(root, LV_SYMBOL_RIGHT, th_font(14),
+                                th_text3());
     lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -6, 0);
 
     g_np_capsule = lv_button_create(root);
@@ -315,11 +315,11 @@ void home_create(lv_obj_t *root)
     lv_obj_set_pos(g_np_capsule, 48, 246);
     lv_obj_set_size(g_np_capsule, 264, 58);
     lv_obj_set_style_radius(g_np_capsule, 29, 0);
-    lv_obj_set_style_bg_color(g_np_capsule, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(g_np_capsule, th_card(), 0);
     lv_obj_set_style_bg_opa(g_np_capsule, LV_OPA_80, 0);
-    lv_obj_set_style_bg_color(g_np_capsule, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(g_np_capsule, th_card_press(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(g_np_capsule, LV_OPA_COVER, LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(g_np_capsule, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(g_np_capsule, th_text(), 0);
     lv_obj_set_style_border_opa(g_np_capsule, LV_OPA_10, 0);
     lv_obj_set_style_border_width(g_np_capsule, 1, 0);
     lv_obj_clear_flag(g_np_capsule, LV_OBJ_FLAG_SCROLLABLE);
@@ -341,8 +341,8 @@ void home_create(lv_obj_t *root)
     lv_obj_center(g_np_art_img);
     lv_obj_add_flag(g_np_art_img, LV_OBJ_FLAG_HIDDEN);
 
-    g_np_thumb_glyph = make_label(g_np_thumb, LV_SYMBOL_AUDIO, &lv_font_montserrat_20,
-                                  lv_color_hex(0xFFFFFF));
+    g_np_thumb_glyph = make_label(g_np_thumb, LV_SYMBOL_AUDIO, th_font(20),
+                                  th_text());
     lv_obj_center(g_np_thumb_glyph);
 
     g_np_title = lv_label_create(g_np_capsule);
@@ -351,7 +351,7 @@ void home_create(lv_obj_t *root)
     lv_obj_set_pos(g_np_title, 62, 10);
     lv_obj_set_size(g_np_title, 148, 20);
     lv_obj_set_style_text_font(g_np_title, ui_font_cjk(16), 0);   /* CJK/long titles render (was tofu) */
-    lv_obj_set_style_text_color(g_np_title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(g_np_title, th_text(), 0);
 
     g_np_artist = lv_label_create(g_np_capsule);
     lv_label_set_text(g_np_artist, "Library");
@@ -359,19 +359,19 @@ void home_create(lv_obj_t *root)
     lv_obj_set_pos(g_np_artist, 62, 31);
     lv_obj_set_size(g_np_artist, 148, 18);
     lv_obj_set_style_text_font(g_np_artist, ui_font_cjk(14), 0);   /* CJK artist names render */
-    lv_obj_set_style_text_color(g_np_artist, lv_color_hex(0xC7C7CC), 0);
+    lv_obj_set_style_text_color(g_np_artist, th_text2(), 0);
 
     lv_obj_t *pp_btn = lv_button_create(g_np_capsule);
     lv_obj_remove_style_all(pp_btn);
     lv_obj_set_pos(pp_btn, 208, 7);
     lv_obj_set_size(pp_btn, 48, 44);
     lv_obj_set_style_radius(pp_btn, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(pp_btn, lv_color_hex(0x3A3A3C), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(pp_btn, th_fill3(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(pp_btn, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_event_cb(pp_btn, pp_event_cb, LV_EVENT_CLICKED, NULL);
 
-    g_np_state = make_label(pp_btn, LV_SYMBOL_PLAY, &lv_font_montserrat_20,
-                            lv_color_hex(0xFFFFFF));
+    g_np_state = make_label(pp_btn, LV_SYMBOL_PLAY, th_font(20),
+                            th_text());
     lv_obj_center(g_np_state);
 }
 

@@ -468,6 +468,52 @@ int mdb_artist_songs(const char *artist, const mdb_song_t **out, int cap){
     return n;
 }
 
+/* Albums an artist appears on, with that artist's track count on each - the level
+ * the Artists view was missing (tapping an artist used to dump every track they
+ * appear on, in one flat list, with no album structure at all).
+ *
+ * Artist matching is per-TOKEN, the same rule mdb_artist_songs uses, so a collab
+ * credited "A, B" puts the album under both A and B. Tracks with no ALBUM tag are
+ * not represented here; the caller offers an "All Songs" row so they stay reachable.
+ * Result is sorted by album name, case-insensitively. */
+int mdb_artist_albums(const char *artist, char names[][MDB_STR], int *counts, int cap){
+    if(!artist || !artist[0] || cap <= 0) return 0;
+    /* collect this artist's albums (one entry per matching track), then sort+group */
+    const char **tmp = malloc((size_t)(g_n>0?g_n:1) * sizeof(char*));
+    if(!tmp) return 0;
+    int m = 0;
+    for(int i=0;i<g_n;i++){
+        if(!g_songs[i].album[0]) continue;
+        char toks[8][MDB_STR];
+        int t = mdb_split_artists(g_songs[i].artist, toks, 8);
+        for(int k=0;k<t;k++)
+            if(!strcasecmp(toks[k], artist)){ tmp[m++] = g_songs[i].album; break; }
+    }
+    qsort(tmp, (size_t)m, sizeof(char*), mdb_pstr_cmp);
+    int n = 0;
+    for(int i=0;i<m;i++){
+        if(n>0 && !strcasecmp(tmp[i], names[n-1])) counts[n-1]++;
+        else { if(n>=cap) break;
+               snprintf(names[n], MDB_STR, "%s", tmp[i]); counts[n] = 1; n++; }
+    }
+    free(tmp);
+    return n;
+}
+
+/* This artist's tracks from ONE album, in the album's own order (the order they
+ * appear in the loaded library, which is the player's SONG order). */
+int mdb_artist_album_songs(const char *artist, const char *album, const mdb_song_t **out, int cap){
+    if(!artist || !album) return 0;
+    int n = 0;
+    for(int i=0;i<g_n && n<cap;i++){
+        if(strcasecmp(g_songs[i].album, album) != 0) continue;
+        char toks[8][MDB_STR];
+        int t = mdb_split_artists(g_songs[i].artist, toks, 8);
+        for(int k=0;k<t;k++) if(!strcasecmp(toks[k], artist)){ out[n++] = &g_songs[i]; break; }
+    }
+    return n;
+}
+
 int mdb_favorites(mdb_song_t *out, int cap){
     sqlite3 *d = db(); if(!d) return 0;
     sqlite3_stmt *st;

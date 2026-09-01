@@ -50,21 +50,21 @@ static lv_obj_t *menu_row(lv_obj_t *list, const char *text, lv_event_cb_t cb, vo
     lv_obj_remove_style_all(r);
     lv_obj_set_size(r, 268, 52);
     lv_obj_set_style_radius(r, 12, 0);
-    lv_obj_set_style_bg_color(r, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(r, th_card(), 0);
     lv_obj_set_style_bg_opa(r, LV_OPA_70, 0);
-    lv_obj_set_style_bg_color(r, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(r, th_card_press(), LV_STATE_PRESSED);
     lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(r, cb, LV_EVENT_CLICKED, ud);
     lv_obj_t *l = lv_label_create(r);
     lv_label_set_text(l, text);
     lv_obj_set_pos(l, 16, 16);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
+    lv_obj_set_style_text_color(l, th_text(), 0);
     return r;
 }
 
 static lv_obj_t *panel_header(lv_obj_t *root, const char *title){
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     return ui_header(root, title);   /* shared standard header; returns the title label */
 }
@@ -178,7 +178,7 @@ static lv_obj_t *dlg_btn(lv_obj_t *p, int y, const char *txt, lv_color_t bg, lv_
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, txt);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
     lv_obj_set_style_text_color(l, fg, 0); lv_obj_center(l);
     return b;
 }
@@ -190,18 +190,18 @@ static void show_dup(long pid){
     lv_obj_set_size(g_dup_dlg, 248, 184);
     lv_obj_center(g_dup_dlg);
     lv_obj_set_style_radius(g_dup_dlg, 16, 0);
-    lv_obj_set_style_bg_color(g_dup_dlg, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(g_dup_dlg, th_card(), 0);
     lv_obj_set_style_bg_opa(g_dup_dlg, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(g_dup_dlg, 1, 0);
-    lv_obj_set_style_border_color(g_dup_dlg, lv_color_hex(0x2C2C2E), 0);
+    lv_obj_set_style_border_color(g_dup_dlg, th_card_press(), 0);
     lv_obj_clear_flag(g_dup_dlg, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *t = lv_label_create(g_dup_dlg);
     lv_label_set_text(t, "Already in this playlist");
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(t, th_font(16), 0);
+    lv_obj_set_style_text_color(t, th_text(), 0);
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 24);
-    dlg_btn(g_dup_dlg, 70,  "Add anyway", lv_color_hex(0x2C2C2E), lv_color_hex(0xFFFFFF), dup_add_cb);
-    dlg_btn(g_dup_dlg, 116, "Cancel",     lv_color_hex(0x2C2C2E), lv_color_hex(0x8E8E93), dup_cancel_cb);
+    dlg_btn(g_dup_dlg, 70,  "Add anyway", th_card_press(), th_text(), dup_add_cb);
+    dlg_btn(g_dup_dlg, 116, "Cancel",     th_card_press(), th_text3(), dup_cancel_cb);
 }
 static void pick_add_cb(lv_event_t *e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
@@ -250,11 +250,11 @@ void plpick_create(lv_obj_t *root){
     lv_obj_set_size(g_pick_toast, 220, 36);
     lv_obj_align(g_pick_toast, LV_ALIGN_BOTTOM_MID, 0, -18);
     lv_obj_set_style_radius(g_pick_toast, 18, 0);
-    lv_obj_set_style_bg_color(g_pick_toast, lv_color_hex(0x2C2C2E), 0);
+    lv_obj_set_style_bg_color(g_pick_toast, th_card_press(), 0);
     lv_obj_set_style_bg_opa(g_pick_toast, LV_OPA_COVER, 0);
     lv_obj_t *tl = lv_label_create(g_pick_toast);
-    lv_obj_set_style_text_color(tl, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(tl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(tl, th_text(), 0);
+    lv_obj_set_style_text_font(tl, th_font(14), 0);
     lv_obj_center(tl);
     lv_obj_add_flag(g_pick_toast, LV_OBJ_FLAG_HIDDEN);
     plpick_reload();
@@ -335,25 +335,25 @@ static lv_obj_t *cyc_row(lv_obj_t *parent, int y, const char *label,
     lv_obj_t *lb = lv_label_create(row);
     lv_label_set_text(lb, label);
     lv_obj_align(lb, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_text_font(lb, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(lb, lv_color_hex(0x8E8E93), 0);
+    lv_obj_set_style_text_font(lb, th_font(14), 0);
+    lv_obj_set_style_text_color(lb, th_text3(), 0);
 
     lv_obj_t *val = lv_label_create(row);
     lv_label_set_text(val, cur);
     lv_obj_align(val, LV_ALIGN_TOP_MID, 0, 26);
-    lv_obj_set_style_text_font(val, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(val, th_font(20), 0);
     lv_obj_set_style_text_color(val, lv_color_hex(ACC), 0);
     *out_val = val;
 
     lv_obj_t *l = lv_button_create(row); lv_obj_remove_style_all(l);
     lv_obj_set_size(l, 44, 44); lv_obj_align(l, LV_ALIGN_LEFT_MID, 4, 8);
     lv_obj_t *li=lv_label_create(l); lv_label_set_text(li, LV_SYMBOL_LEFT);
-    lv_obj_set_style_text_color(li, lv_color_hex(0xFFFFFF), 0); lv_obj_center(li);
+    lv_obj_set_style_text_color(li, th_text(), 0); lv_obj_center(li);
     lv_obj_add_event_cb(l, cb, LV_EVENT_CLICKED, (void*)(intptr_t)-1);
     lv_obj_t *r = lv_button_create(row); lv_obj_remove_style_all(r);
     lv_obj_set_size(r, 44, 44); lv_obj_align(r, LV_ALIGN_RIGHT_MID, -4, 8);
     lv_obj_t *ri=lv_label_create(r); lv_label_set_text(ri, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_color(ri, lv_color_hex(0xFFFFFF), 0); lv_obj_center(ri);
+    lv_obj_set_style_text_color(ri, th_text(), 0); lv_obj_center(ri);
     lv_obj_add_event_cb(r, cb, LV_EVENT_CLICKED, (void*)(intptr_t)1);
     return row;
 }
@@ -370,11 +370,11 @@ void tune_create(lv_obj_t *root){
     lv_obj_remove_style_all(cust);
     lv_obj_set_size(cust, 180, 40); lv_obj_align(cust, LV_ALIGN_TOP_MID, 0, 236);
     lv_obj_set_style_radius(cust, 20, 0);
-    lv_obj_set_style_bg_color(cust, lv_color_hex(0x1C1C1E), 0);
+    lv_obj_set_style_bg_color(cust, th_card(), 0);
     lv_obj_set_style_bg_opa(cust, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(cust, lv_color_hex(0x2C2C2E), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(cust, th_card_press(), LV_STATE_PRESSED);
     lv_obj_add_event_cb(cust, eq_custom_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cl=lv_label_create(cust); lv_label_set_text(cl, "Custom EQ");
-    lv_obj_set_style_text_font(cl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(cl, lv_color_hex(0xFFFFFF), 0); lv_obj_center(cl);
+    lv_obj_set_style_text_font(cl, th_font(16), 0);
+    lv_obj_set_style_text_color(cl, th_text(), 0); lv_obj_center(cl);
 }

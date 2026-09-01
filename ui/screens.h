@@ -4,11 +4,14 @@
 #define SCREENS_H
 #include "lvgl/lvgl.h"
 #include "ipc.h"
+#include "theme.h"   /* palette + font tokens: every screen paints from these */
 #include <stdbool.h>
-enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_COUNT };
+enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTINGS_GROUP, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_SCAN, SCR_COUNT };
 void screens_init(void);
 void screen_show(int which);
 void screen_back(void);
+void screen_home(void);   /* discard the nav stack and return to Home */
+int  screen_depth(void);  /* how many screens deep we are (0 = Home) */
 void screen_set_anim(int on);
 int  screen_current(void);
 void ui_toast(const char *msg);   /* transient completion-feedback message */
@@ -73,8 +76,15 @@ void apps_create(lv_obj_t *root);
 void apps_reload(void);
 void app_launch(const char *exec);
 /* settings (master list + drill-in detail) */
-void settings_create(lv_obj_t *root);
+void settings_create(lv_obj_t *root);          /* the category index */
+void settings_group_create(lv_obj_t *root);    /* one category's rows */
+void settings_group_refresh(void);
+void settings_open_group(int gi);              /* open category `gi` (index into the derived group list) */
 void settings_refresh_list(void);
+/* library scan progress (scanview.c) */
+void scanview_create(lv_obj_t *root);
+void scanview_open(void);            /* start a scan if idle, then show SCR_SCAN */
+void scanview_set_visible(int on);   /* screen manager: poll only while it is on screen */
 void settings_apply_startup(void);
 
 /* accent plumbing: the live accent + per-screen repaint so no surface shows a stale colour */
@@ -113,6 +123,7 @@ void ui_set_sleep_timer(int minutes);   /* 0 = off; pauses playback when it elap
 void setting_detail_create(lv_obj_t *root);
 void setting_detail_refresh(void);
 void settings_open_detail(int idx);
+void settings_open_named(const char *label);   /* deep-link a control by its label */
 /* reusable on-screen keyboard modal (kbinput.c) */
 typedef void (*kbinput_done_cb_t)(const char *text);  /* text=NULL if cancelled/empty */
 void kbinput_open(const char *title, const char *initial, kbinput_done_cb_t cb);

@@ -22,7 +22,7 @@ static lv_obj_t *screen_make_root(lv_obj_t *parent)
     lv_obj_remove_style_all(root);
     lv_obj_set_size(root, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(root, 0, 0);
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(root, th_bg(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     /* full black square; the physical round bezel masks the shape. Clipping to a
      * circle here just exposed the lighter screen behind at the corners. */
@@ -108,6 +108,9 @@ static void transition(int from, int to, int dir)
      * routes through here - screen_show alone missed the back case, leaving stale labels
      * e.g. after editing Custom EQ / a setting detail page). */
     if (to == SCR_SETTINGS) settings_refresh_list();
+    else if (to == SCR_SETTINGS_GROUP) settings_group_refresh();   /* rebuilt on every entry: values are never stale */
+    if (to != SCR_SCAN && from == SCR_SCAN) scanview_set_visible(0);   /* stop polling once it is off screen */
+    else if (to == SCR_SCAN) scanview_set_visible(1);
     else if (to == SCR_TUNE)  tune_refresh();
     else if (to == SCR_SAVER) saver_show_sync();
     else if (to == SCR_PLVIEW) plview_refresh();   /* fresh song list every entry (no stale tap positions) */
@@ -177,14 +180,41 @@ static void transition(int from, int to, int dir)
     }
 }
 
+/* Screens that are TAKEOVERS, not places: the pull-down panel and the screensaver
+ * cover whatever you were doing and are dismissed back to it. They must never
+ * become a rung on the ladder, or "pull down, dismiss, pull down, dismiss" quietly
+ * grows the back stack. */
+static int is_overlay(int which){ return which == SCR_QUICK || which == SCR_SAVER; }
+
 void screen_show(int which)
 {
     if (which < 0 || which >= SCR_COUNT) return;
     int from = s_current;
-    if (which != s_current) {
+    if (which == s_current) return;      /* already here: not a navigation at all */
+
+    /* ---- REVISIT COLLAPSE ------------------------------------------------------
+     * The stack is a LADDER of distinct places, not a log of every screen you have
+     * ever looked at. Bouncing between two screens (Now Playing <-> its hub, a list
+     * <-> a detail) used to push a fresh entry every single time, so three round
+     * trips meant six back-swipes to reach Home - with no way to shortcut it.
+     *
+     * So: if `which` is already ON the stack, this is a RETURN to somewhere we came
+     * from, not a step deeper. Unwind to that rung (dropping everything above it)
+     * and play the BACK transition, which is also what the motion should say. The
+     * result is that the depth of the stack tracks how deep you actually are, and
+     * Home is always at the bottom. */
+    for (int i = s_sp - 1; i >= 0; i--) {
+        if (s_stack[i] != which) continue;
+        s_sp = i;                        /* drop this entry and everything above it */
+        s_current = which;
+        transition(from, which, is_overlay(from) ? +1 : -1);
+        return;
+    }
+
+    if (!is_overlay(s_current)) {         /* overlays are dismissed, never returned to */
         int cap = (int)(sizeof(s_stack)/sizeof(s_stack[0]));
-        if (s_sp >= cap) {            /* full: keep the root (s_stack[0]) so Back still
-                                       * reaches Home; drop the 2nd-oldest instead */
+        if (s_sp >= cap) {                /* full: keep the root (s_stack[0]) so Back still
+                                           * reaches Home; drop the 2nd-oldest instead */
             for (int i = 2; i < cap; i++) s_stack[i-1] = s_stack[i];
             s_sp = cap - 1;
         }
@@ -203,6 +233,22 @@ void screen_back(void)
     s_current = prev;
     transition(from, prev, -1);
 }
+
+/* Jump straight to Home from anywhere, discarding the whole ladder - the escape
+ * hatch the stock UI has and diskOS did not. Wired to the Quick Settings Home tile
+ * and to a long-press on any screen header's back chevron. */
+void screen_home(void)
+{
+    int from = s_current;
+    s_sp = 0;
+    if (from == SCR_HOME) { transition(from, SCR_HOME, -1); return; }
+    s_current = SCR_HOME;
+    transition(from, SCR_HOME, -1);   /* back-motion: you are unwinding, not descending */
+}
+
+/* How deep the current screen sits (0 = Home). Lets a screen decide whether to
+ * offer a "Home" affordance at all. */
+int screen_depth(void){ return s_sp; }
 
 lv_obj_t *screen_get_root(int which)
 {
@@ -223,7 +269,7 @@ void screens_init(void)
     if (access("/usr/data/anim_off", 0) == 0) s_anim = 0;   /* legacy override */
 
     lv_obj_t *parent = lv_screen_active();
-    lv_obj_set_style_bg_color(parent, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(parent, th_bg(), 0);
     lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
     /* The screen container must not scroll: during a slide, the incoming screen sits off-screen
      * to the right (x=+360), which overflows the parent and makes LVGL draw a horizontal
@@ -235,6 +281,7 @@ void screens_init(void)
     s_roots[SCR_LIBRARY] = screen_make_root(parent);
     s_roots[SCR_NOWPLAYING] = screen_make_root(parent);
     s_roots[SCR_SETTINGS] = screen_make_root(parent);
+    s_roots[SCR_SETTINGS_GROUP] = screen_make_root(parent);
     s_roots[SCR_SETTING_DETAIL] = screen_make_root(parent);
     s_roots[SCR_SEARCH] = screen_make_root(parent);
     s_roots[SCR_SAVER] = screen_make_root(parent);
@@ -257,6 +304,7 @@ void screens_init(void)
     s_roots[SCR_LASTFM] = screen_make_root(parent);
     s_roots[SCR_WORKMODE] = screen_make_root(parent);
     s_roots[SCR_DEBUG] = screen_make_root(parent);
+    s_roots[SCR_SCAN] = screen_make_root(parent);
 
     /* depth scrim: a full-screen translucent-black overlay, created LAST so it sits above the
      * roots in sibling order; re-parented in z during a transition to dim the screen beneath the
@@ -265,7 +313,7 @@ void screens_init(void)
     lv_obj_remove_style_all(s_scrim);
     lv_obj_set_size(s_scrim, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(s_scrim, 0, 0);
-    lv_obj_set_style_bg_color(s_scrim, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(s_scrim, th_bg(), 0);
     lv_obj_set_style_bg_opa(s_scrim, LV_OPA_COVER, 0);   /* object opacity (animated) gates visibility */
     lv_obj_set_style_opa(s_scrim, LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(s_scrim, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
@@ -277,6 +325,7 @@ void screens_init(void)
     library_create(s_roots[SCR_LIBRARY]);
     ui_create(s_roots[SCR_NOWPLAYING]);
     settings_create(s_roots[SCR_SETTINGS]);
+    settings_group_create(s_roots[SCR_SETTINGS_GROUP]);
     setting_detail_create(s_roots[SCR_SETTING_DETAIL]);
     search_create(s_roots[SCR_SEARCH]);
     saver_create(s_roots[SCR_SAVER]);
@@ -288,6 +337,7 @@ void screens_init(void)
     colorpick_create(s_roots[SCR_COLORPICK]);
     modes_create(s_roots[SCR_WORKMODE]);
     debug_create(s_roots[SCR_DEBUG]);
+    scanview_create(s_roots[SCR_SCAN]);
     apps_create(s_roots[SCR_APPS]);
     nphub_create(s_roots[SCR_NPHUB]);
     plpick_create(s_roots[SCR_PLPICK]);

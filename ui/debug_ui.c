@@ -181,8 +181,8 @@ void debug_open(void){
 
 void debug_create(lv_obj_t *root){
     g_title = lv_label_create(root);
-    lv_obj_set_style_text_font(g_title, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(g_title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(g_title, th_font(20), 0);
+    lv_obj_set_style_text_color(g_title, th_text(), 0);
     lv_label_set_text(g_title, "Debug Mode");
     lv_obj_align(g_title, LV_ALIGN_TOP_MID, 0, 44);
 
@@ -190,24 +190,24 @@ void debug_create(lv_obj_t *root){
      * contrast (bright white); the password also gets the accent colour + bigger font to stand out. */
     g_ssh = lv_label_create(root);
     lv_obj_set_width(g_ssh, 320); lv_obj_set_style_text_align(g_ssh, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(g_ssh, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(g_ssh, th_text(), 0);
     lv_obj_align(g_ssh, LV_ALIGN_TOP_MID, 0, 94);
 
     g_pw = lv_label_create(root);
     lv_obj_set_width(g_pw, 320); lv_obj_set_style_text_align(g_pw, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(g_pw, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(g_pw, th_font(24), 0);
     lv_obj_set_style_text_color(g_pw, ui_current_accent(), 0);
     lv_obj_align(g_pw, LV_ALIGN_TOP_MID, 0, 122);
 
     g_serial = lv_label_create(root);
     lv_obj_set_width(g_serial, 300); lv_obj_set_style_text_align(g_serial, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(g_serial, lv_color_hex(0x8E8E93), 0);
+    lv_obj_set_style_text_color(g_serial, th_text3(), 0);
     lv_obj_align(g_serial, LV_ALIGN_TOP_MID, 0, 158);
 
     g_warn = lv_label_create(root);
     lv_obj_set_width(g_warn, 280); lv_label_set_long_mode(g_warn, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(g_warn, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(g_warn, lv_color_hex(0xFF5E5B), 0);
+    lv_obj_set_style_text_color(g_warn, th_danger(), 0);
     lv_obj_align(g_warn, LV_ALIGN_TOP_MID, 0, 190);
 
     lv_obj_t *btn = lv_button_create(root);
