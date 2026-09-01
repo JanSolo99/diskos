@@ -1,0 +1,21 @@
+# Build artifacts
+*.o
+*.d
+*.log
+
+# Compiled binaries (main UI + on-device tools)
+ipodos-ui
+fbshot
+mqfeed
+mqsend
+touchcap
+touchdisc
+
+# Backups / scratch
+*.bak
+*.working.bak
+*.raw
+
+# Font source blobs (fonts are shipped as generated font_*.c arrays)
+*.ttf
+config.mk

@@ -1,288 +1,371 @@
-# diskOS
+<p align="center">
+  <img src="docs/assets/diskos-hero.png" alt="diskOS running on a round digital audio player" width="100%">
+</p>
 
-**diskOS** is a custom player UI/firmware for the **FiiO Snowsky Disc** digital audio player
-(Ingenic X2000). It replaces the stock interface, and ships with an installer (run from source with
-your own Python; a setup script sets up a local virtual environment) that flashes it onto the device
-over the chip's mask-ROM USB mode - building the image **from your own stock firmware**, so no FiiO
-rootfs is redistributed. The installer tooling in this repo is open
-source; the diskOS UI itself (`payload/mq_ui`) currently ships as a **binary-only component**
-(see [License](#license)).
+<h1 align="center">diskOS</h1>
 
-> ⚠️ **Unsupported beta tool - read this.** Installing **erases and rewrites the device's main
-> root filesystem**. Power loss, host sleep, a bad cable, a software defect, an unsupported
-> DRAM/NAND variant, or running it on the wrong X2000 device can leave the player unbootable, lose
-> data, or require hardware recovery. Mask-ROM reflashing recovered the tested unit(s), but
-> **recovery is not guaranteed** for every unit or every failure. This may void your warranty.
-> Not affiliated with or endorsed by FiiO, Snowsky, or Ingenic. **Proceed at your own risk; no
-> warranty or support is promised.** Back up your data and keep the installer's saved stock image
-> on separate storage.
+<p align="center">
+  A purpose-built player interface for the FiiO Snowsky Disc.<br>
+  Designed around the round screen, the music library, and the way the hardware wants to be used.
+</p>
 
-> 🧪 **BETA.** Validated on the **Winbond W63AH6NKB (LPDDR3)** DRAM - the chip the Snowsky Disc
-> uses. The Disc's own stock bootloader initializes only this chip, so every Disc that runs stock
-> firmware has it; this is the Disc's DRAM, not one of several variants. We have flashed and booted
-> our own unit(s), but wide field-testing is still ongoing, so treat it as beta. In the unlikely
-> event a future hardware revision ever ships different DRAM, the flash fails safe at memory init
-> (the device stays mask-ROM-recoverable) rather than completing. Report your results.
+<p align="center">
+  <a href="#install"><img alt="Platform: Linux x86-64" src="https://img.shields.io/badge/platform-Linux%20x86__64-3D424B?style=flat-square"></a>
+  <a href="#whats-proven-vs-beta"><img alt="Status: beta" src="https://img.shields.io/badge/status-beta-B99AC8?style=flat-square"></a>
+  <a href="LICENSE"><img alt="Installer license: MIT" src="https://img.shields.io/badge/installer-MIT-D77868?style=flat-square"></a>
+  <a href="https://ko-fi.com/b0hemia"><img alt="Support diskOS on Ko-fi" src="https://img.shields.io/badge/Ko--fi-support%20diskOS-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white"></a>
+</p>
 
-## Documentation
+<p align="center">
+  <a href="#see-diskos">Screenshots</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#restore-stock--recover">Restore</a> ·
+  <a href="#known-issues">Known issues</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="#contributing">Contribute</a>
+</p>
 
-| Doc | What's in it |
+> [!CAUTION]
+> **diskOS is an unsupported beta and installation rewrites the Disc's main root filesystem.**
+> Power loss, host sleep, a bad cable, a defect, an unsupported device, or an interrupted flash can
+> make the player unbootable, lose data, require hardware recovery, or void its warranty. Recovery
+> worked on tested units, but is **not guaranteed**. Back up your data and keep the saved stock image
+> on separate storage before installing.
+
+diskOS is a custom player UI/firmware for the **FiiO Snowsky Disc** digital audio player
+(Ingenic X2000). It replaces the stock interface and uses a source-run installer to build a diskOS
+image locally from **your own official FiiO firmware**, then flashes it over the chip's mask-ROM USB
+mode. No FiiO root filesystem is distributed by this project.
+
+The installer and build tooling in this repository are open source under the MIT license. The
+on-device UI source lives in [`ui/`](ui/) and is licensed separately under **GPL-3.0-or-later** (its built
+artifact, `payload/mq_ui`, is what the installer bakes into the image); see [License](#license) for
+the boundary.
+
+## At a glance
+
+| | |
 |---|---|
-| [`docs/HARDWARE.md`](docs/HARDWARE.md) | Live-probed hardware capability map: SoC, the quad CS43131 balanced DACs, display planes, power ICs, wireless, USB, and the stock-vs-hardware gap list. |
-| [`docs/COMMAND_MAP.md`](docs/COMMAND_MAP.md) | The player IPC command surface: ~221 `mq_player` tags, reply frames, and the MCU/SPI command set - what you drive to build features. |
-| [`docs/RE_CATALOGUE.md`](docs/RE_CATALOGUE.md) | Reverse-engineering of the `mq_player`/`mq_ui` binaries: structure, tables, string maps, network receivers. |
-| [`NOTICE.md`](NOTICE.md) | Third-party components and their licenses (GPL usbboot, squashfs-tools, the SPL, etc.). |
-| [`SPL_SOURCE.md`](SPL_SOURCE.md) | GPL corresponding source + build recipe for the stage-1 DRAM bring-up bootloader. |
-| [`DEPENDENCY_INVENTORY.md`](DEPENDENCY_INVENTORY.md) | Libraries a *self-built* onefile would bundle + their obligations (the source release does not bundle these). |
-| [`docs/PRIVACY.md`](docs/PRIVACY.md) | What the installer and the on-device UI send over the network. |
-| [`agents/`](agents/) | A project brief you can drop into Claude Code or Codex to work on diskOS with an AI agent. |
-| [`SECURITY.md`](SECURITY.md) / [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to report vulnerabilities; how to contribute safely. |
-| [`licenses/`](licenses/) | Verbatim license texts for the shipped third-party components. |
+| **Device** | FiiO Snowsky Disc |
+| **Project status** | Beta; field testing is still limited |
+| **Released host** | Linux x86-64 |
+| **macOS** | Build path exists; artifact and device flash are unverified |
+| **Flash-tested stock firmware** | V2.09 and V2.28 |
+| **Typical flash time** | 60-90 minutes, including verification |
+| **Return to stock** | Saved-image restore, temporary stock boot, or stock UI as default |
 
-## First-time setup
+Not affiliated with or endorsed by FiiO, Snowsky, or Ingenic. No warranty or support is promised.
 
-The installer runs from source with your own Python. A one-time setup script builds a local
-virtual environment and installs the two Python dependencies into it (nothing is installed
-system-wide):
+## See diskOS
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/assets/home.png" alt="diskOS home screen" width="240"><br><sub>Home</sub></td>
+    <td align="center"><img src="docs/assets/now-playing.png" alt="diskOS now playing screen" width="240"><br><sub>Now playing</sub></td>
+    <td align="center"><img src="docs/assets/library.png" alt="diskOS music library" width="240"><br><sub>Library</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/assets/alphabet.png" alt="diskOS alphabet navigation" width="240"><br><sub>Fast navigation</sub></td>
+    <td align="center"><img src="docs/assets/apps.png" alt="diskOS apps screen" width="240"><br><sub>Apps</sub></td>
+    <td align="center"><img src="docs/assets/eq.png" alt="diskOS custom equalizer" width="240"><br><sub>Custom EQ</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/boot-animation.gif" alt="Premium diskOS boot animation concept" width="320">
+  <br><sub>Premium boot concept: clockwise from the lower-left, matching the real seek-ring geometry.</sub>
+</p>
+
+### Built around the Disc
+
+| For listening | For tinkering |
+|---|---|
+| Circular UI designed for the round display | Graphical and command-line installer |
+| Bezel scrolling and alphabet navigation | Image built locally from your stock firmware |
+| M3U playlist import | Bad-block-aware writer with block verification |
+| Dynamic colors derived from album art | Opt-in SSH debug mode, off by default |
+| Local playback as the well-tested path | Hardware map and reverse-engineering notes |
+| Weather and Last.fm integrations *(experimental)* | Stock UI fallback and restore path |
+
+## Install
+
+> [!IMPORTANT]
+> Read [Requirements](#requirements), [What's proven vs. beta](#whats-proven-vs-beta), and
+> [Known issues](#known-issues) before connecting the player. Do not run the installer as root.
+
+### First-time setup
+
+The installer runs with your own **Python 3.8+**. The setup script creates a local virtual
+environment and installs two Python dependencies into it; nothing is installed system-wide.
 
 ```bash
 ./install.sh
 ```
 
-You need **Python 3.8+**. The script also checks for two optional system components and prints the
-exact package to install if either is missing:
-- **Tk / tkinter** - only for the *graphical* installer (the command line works without it).
-  Debian/Ubuntu: `sudo apt install python3-tk`.
-- **libusb-1.0** - to detect the device in mask-ROM mode.
-  Debian/Ubuntu: `sudo apt install libusb-1.0-0`.
+The setup check will tell you if either optional system component is missing:
 
-After setup, run everything through `./diskos-installer` (it uses the `.venv` automatically).
+- **Tk / tkinter:** needed only by the graphical installer. Debian/Ubuntu:
+  `sudo apt install python3-tk`
+- **libusb-1.0:** used to detect the device in mask-ROM mode. Debian/Ubuntu:
+  `sudo apt install libusb-1.0-0`
 
-## Install (graphical)
+After setup, run commands through `./diskos-installer`; it selects the local environment for you.
 
-1. Launch the graphical installer: `./diskos-installer gui`.
-2. Choose **Install diskOS**, pick your FiiO firmware `.zip`, and a variant:
-   - **Public** - no *always-on* root shell (recommended). Debug Mode can still enable SSH on
-     demand from the UI (opt-in, off by default - see below).
-   - **Dev** - adds an always-on USB-serial **root shell**. ⚠️ **This is a passwordless root shell
-     available to anyone with physical USB access, on every boot; it bypasses normal device
-     security.** Only use it on a development device you control, never an everyday or untrusted one.
-3. Put the device in **mask-ROM**: power it **off**, hold **Volume-Down**, and plug in USB (the
-   screen stays **black** - that's correct).
-4. Click **Install**, tick the acknowledgement, and **Begin**. Don't disconnect or let the computer
-   sleep during the flash (~**60-90 minutes**).
-5. When it verifies, **power-cycle** the device. The UI is embedded in the flashed image, so first
-   boot installs diskOS automatically - **no microSD step needed**.
+> [!NOTE]
+> A source checkout does not include the large host-native flash tools. Build them once using the
+> scripts in [For developers](#for-developers). A prepared release bundle places them under
+> `vendor/<os>-<arch>/`.
 
-## Install (command line)
+### Graphical installer
+
+1. Run `./diskos-installer gui`.
+2. Choose **Install diskOS**, select your official FiiO firmware `.zip`, then select a variant:
+   - **Public** *(recommended):* no always-on root shell. SSH can still be enabled temporarily
+     from Debug Mode in the UI.
+   - **Dev:** adds a passwordless USB-serial root shell on every boot. Use this only on a dedicated
+     development device you control.
+3. Power the Disc off. Hold **Volume Down** and plug in USB to enter mask-ROM mode. The screen stays
+   black; that is expected.
+4. Select **Install**, acknowledge the warning, and begin. Do not disconnect the cable or let the
+   host sleep during the 60-90 minute flash.
+5. After verification succeeds, power-cycle the device. diskOS is embedded in the flashed image and
+   installs on first boot; no microSD installation step is needed.
+
+### Command line
 
 ```bash
-./install.sh                                   # one-time: build the .venv + install Python deps
-./diskos-installer doctor                      # check host + bundled tools + device
+./install.sh
+./diskos-installer doctor
 ./diskos-installer install --firmware SNOWSKY_DISC_update_*.zip --variant public
-./diskos-installer restore-stock               # deactivate diskOS -> reflash your saved stock rootfs
-./diskos-installer remove                      # delete the installer's saved files from this computer
+```
+
+Useful recovery and cleanup commands:
+
+```bash
+./diskos-installer restore-stock
+./diskos-installer remove
 ```
 
 ## Requirements
 
-- Your device's **official FiiO firmware** as a `.zip` (we never ship FiiO's rootfs - you supply
-  it; download it from FiiO's firmware page for the Snowsky Disc). The installer decrypts and
-  extracts the stock rootfs from it locally.
-- A USB cable and ~**60-90 minutes** for the flash.
-- **Python 3.8+** and the two pip dependencies (installed into a local `.venv` by `./install.sh`).
-- USB access to the mask-ROM device (`a108:eaef`). **Don't run the installer as root** - it keeps your
-  saved recovery image and state under your home directory, and `sudo` would misplace them. Instead
-  install the bundled udev rule once so your normal user has access:
-  ```bash
-  sudo cp udev/70-diskos-maskrom.rules /etc/udev/rules.d/
-  sudo udevadm control --reload-rules && sudo udevadm trigger
-  ```
-  (The whole build+save+flash runs as one user process; there is no separate "flash step" to elevate.)
-- **Linux (x86_64):** this is the released platform - the tarball ships the native flash tools
-  prebuilt in `vendor/linux-x86_64/`.
-- **macOS (Apple Silicon + Intel):** no release artifact yet; it's a **build-from-source** path -
-  clone the repo and run `build/build-macos.sh` first (`libusb` via `brew install libusb`). See
-  *For developers*. Treat macOS as unverified until built and flashed.
+- A **FiiO Snowsky Disc** with supported stock firmware.
+- The matching official FiiO firmware `.zip`. You supply this file; the installer decrypts and
+  extracts its root filesystem locally.
+- A reliable USB cable and 60-90 uninterrupted minutes.
+- **Python 3.8+** and the dependencies installed by `./install.sh`.
+- USB access to mask-ROM device `a108:eaef`.
+- **Linux x86-64** for the released path. macOS support remains unverified.
 
-## Remove diskOS / restore stock
+Do **not** run the installer with `sudo`. Its saved recovery image and state belong under your user
+account. On Linux, install the included udev rule once instead:
 
-`restore-stock` reflashes the stock rootfs the installer built and saved during install - a
-checksum-verified reconstruction of your firmware's rootfs (not a dump of the device's original
-partition). This **deactivates diskOS**; inert diskOS files under `/usr/data` remain until you
-delete them - it is not a factory wipe. You can also switch back temporarily:
-**Settings → System → Default UI → Stock**, or hold **Vol-Up at power-on** to boot the other UI once.
+```bash
+sudo cp udev/70-diskos-maskrom.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
 
-If a flash fails or is interrupted, the main rootfs may be **partially written** and the device
-may not boot normally. In the tested cases you can return to mask-ROM (power off, hold Vol-Down,
-replug) and re-flash or restore your saved stock image. Mask-ROM is normally reachable because it
-lives in on-chip ROM and is entered by a button combo before any flashed code runs, but recovery
-is **not guaranteed** on untested hardware or every failure mode.
+The build, save, and flash then run as one unprivileged process.
 
-## What's proven vs. beta (honest)
+### Host support
 
-- ✅ **Flash mechanism + image build** - proven; it's how diskOS was flashed to real hardware,
-  including the bad-block-aware writer skipping factory bad blocks and verifying every block.
-- ✅ **Firmware extraction** - reproduces the stock rootfs byte-for-byte from FiiO's zip.
-- ✅ **Linux** - the app builds and flashes end-to-end.
-- ⚠️ **macOS** - code is macOS-aware and the build recipe is provided, but the macOS artifact has
-  not yet been produced/tested on Apple hardware. Treat as unverified until built + flashed.
-- ⚠️ Each stock firmware version should be flash-tested before it's declared supported
-  (V2.09 and V2.28 so far).
+- **Linux x86-64:** released and tested end to end.
+- **macOS, Apple Silicon and Intel:** source is macOS-aware, but there is no verified release
+  artifact yet. Build on a Mac with `build/build-macos.sh` after installing libusb with Homebrew.
+  Treat the entire path as unverified until a real-device flash succeeds.
 
-## Known issues (this beta)
+## Restore stock & recover
 
-diskOS is an early beta. What we know about:
+`restore-stock` reflashes the checksum-verified stock root filesystem reconstructed and saved during
+installation. It deactivates diskOS, but it is not a factory wipe; inactive files under `/usr/data`
+remain until you remove them.
 
-- **Firmware coverage.** Only **V2.09** and **V2.28** are flash-tested. Newer stock versions use
-  different internal command codes and are refused by default (override at your own risk).
-- **~90-minute flash.** A full install writes **and verifies** the whole root filesystem over USB, so
-  it takes roughly **60-90 minutes**. Don't disconnect or let the host sleep. (Most of that time is a
-  conservative fixed wait; a faster writer is planned.)
-- **No on-device updates.** Updating diskOS means re-flashing with the installer; there is no
-  over-the-air path yet.
-- **microSD at cold boot.** The card is auto-mounted a few seconds into boot. If your library is
-  empty right after a **cold** boot, reinsert the card once and it should mount.
-- **Output/work modes.** USB-DAC, Bluetooth-receiver, and USB-storage modes are wired but lightly
-  tested; local playback is the well-worn path.
-- **USB-serial debug is unreliable.** The optional serial shell can be finicky (a USB CDC-ACM
-  flow-control quirk); prefer **Debug Mode's SSH over WiFi** for remote access (see below).
-- **Last.fm scrobbling is unverified beta.** The building blocks (HTTPS transport, request signing,
-  parsing) are tested, but the full connect-and-scrobble round-trip against a live Last.fm account has
-  not yet been run end-to-end. It is **off by default** and needs your own Last.fm API key; treat it as
-  experimental. Credential setup transfers your API key over your **local network in plain HTTP** - see
-  [`docs/PRIVACY.md`](docs/PRIVACY.md).
+You can also switch without reflashing:
 
-Found something else? Open an issue with your device's **firmware version** and any on-screen
-**error code**.
+- **Persistently:** Settings → System → Default UI → Stock
+- **Once:** hold **Volume Up** during power-on
 
-## Debug Mode (optional remote access)
+If a flash fails, the root filesystem can be left partially written. In tested cases, the device
+could be returned to mask-ROM mode by powering off, holding **Volume Down**, and reconnecting USB,
+then reflashing diskOS or the saved stock image. Mask-ROM lives in on-chip ROM and is entered before
+flashed code runs, but recovery is still **not guaranteed** for every unit or failure.
 
-For development or troubleshooting, diskOS can expose a remote shell **on demand** - it is **OFF by
-default**. Open **Settings → System → Debug Mode → Enable Debug**. The screen then shows:
+## What's proven vs. beta
 
-- an **SSH** command (`ssh root@<device-ip>`) reachable over WiFi, and
-- a **fresh random password**, generated per-enable and shown on that screen.
+| Status | Area | Current evidence |
+|---|---|---|
+| ✅ | Flash mechanism and image build | Used on real hardware; writer skips factory bad blocks and verifies every block |
+| ✅ | Firmware extraction | Reproduces the stock root filesystem byte for byte from FiiO's archive |
+| ✅ | Linux x86-64 | Builds and flashes end to end |
+| ⚠️ | macOS | Build recipe exists; artifact and real-device flash are unverified |
+| ⚠️ | Firmware coverage | V2.09 and V2.28 are flash-tested; other versions are refused by default |
 
-> ⚠️ **This grants root access to the device over your network while it is on.** Only enable it on a
-> network you trust, and turn it **off** when you are done. The password is random and rotates each
-> time you enable it; the device's stock password is never used or exposed.
->
-> **Where the password lives:** while Debug Mode is on, the current password is also written in
-> **plaintext** to `/usr/data/sshd/current_pw` (mode 0600, root-only) so the screen can show it again
-> after a UI restart. Disabling Debug Mode deletes it. A **reboot while it is still on** can leave a
-> stale copy - harmless, because a reboot drops the SSH overlay (so that password no longer works
-> until you re-enable), but you can delete the file manually if you want it gone. It is only as
-> protected as physical/root access to the device's storage.
->
-> **SSH server:** Debug Mode uses **Dropbear 2022.83**, which predates the CVE-2023-48795 "Terrapin"
-> Strict-KEX mitigation (an update is planned). Because Debug Mode is opt-in and short-lived, exposure
-> is limited, but keep it off on untrusted networks. Serial (USB) is available only on **dev** builds
-> and is unreliable (see the known issue above); public builds expose no serial shell.
+The Disc uses **Winbond W63AH6NKB LPDDR3**, the DRAM initialized by its stock bootloader. If a future
+hardware revision uses different DRAM, the writer is designed to fail at memory initialization and
+leave the device mask-ROM-recoverable instead of continuing. Wide field testing is still in progress.
 
-## How it works (in brief)
+## Known issues
 
-diskOS runs by a small hook in the stock `fiio_init.sh` that launches our UI (`mq_ui`) instead of
-the stock one. Because the rootfs is a **read-only squashfs**, enabling that hook means rewriting
-the rootfs partition (mtd2) - hence the flash. The UI itself is embedded in the image and installed
-to the writable `/usr/data` on first boot, verified against a baked SHA-256 manifest; if it does
-not match, the stock UI runs instead (**fail-closed**). You **cannot** install from the device's own
-"System updates" menu - that path checks a signature we can't forge, so mask-ROM USB is the only
-way in. See [`docs/HARDWARE.md`](docs/HARDWARE.md) for the partition map and the rest of the hardware.
+- **Firmware coverage:** only V2.09 and V2.28 are currently flash-tested. Other command maps can
+  differ and are refused by default.
+- **Long flash:** a complete write and verification takes about 60-90 minutes. Most of the time is
+  a conservative fixed wait; a faster writer is planned.
+- **No on-device update path:** updating diskOS currently requires another flash.
+- **microSD after cold boot:** the card mounts a few seconds after startup. If the library initially
+  appears empty, reinsert the card once.
+- **Lightly tested modes:** USB DAC, Bluetooth receiver, and USB storage have less coverage than
+  local playback.
+- **USB-serial debug:** the dev variant's CDC-ACM serial shell can be unreliable. Prefer temporary
+  SSH over Wi-Fi.
+- **Last.fm:** scrobbling is experimental and has not completed a live end-to-end verification.
+  Setup transfers your API key over your local network in plaintext HTTP. It is off by default; read
+  [`docs/PRIVACY.md`](docs/PRIVACY.md) first.
+
+Found another issue? Open a GitHub issue and include the device's **firmware version** and the exact
+on-screen **error code**.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Official FiiO firmware ZIP] --> B[Local extraction and validation]
+    C[diskOS UI payload] --> D[Build verified rootfs image]
+    B --> D
+    D --> E[Ingenic mask-ROM USB]
+    E --> F[Bad-block-aware write and verify]
+    F --> G[diskOS first boot]
+    F -. saved image .-> H[Restore stock]
+```
+
+diskOS adds a small hook to the stock `fiio_init.sh` that launches `mq_ui` instead of the stock UI.
+The stock root filesystem is read-only squashfs, so enabling the hook requires rewriting partition
+`mtd2`. On first boot, the embedded UI is copied to writable storage and checked against a baked
+SHA-256 manifest. If validation fails, the stock UI launches instead.
+
+The device's normal update menu checks a signature this project cannot create, so installation uses
+mask-ROM USB. See [`docs/HARDWARE.md`](docs/HARDWARE.md) for the partition map and hardware details.
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) | Round-screen tokens, edge-ring geometry, components, accessibility, and boot motion |
+| [`docs/PREVIEW_UI_BUILD.md`](docs/PREVIEW_UI_BUILD.md) | Preview an `mq_ui` build on the Disc live over Wi-Fi, no reflash (reverts on reboot) |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md) | Live-probed SoC, four CS43131 DACs, display planes, power, wireless, USB, and hardware gaps |
+| [`docs/COMMAND_MAP.md`](docs/COMMAND_MAP.md) | Roughly 221 `mq_player` IPC tags, reply frames, and MCU/SPI commands |
+| [`docs/RE_CATALOGUE.md`](docs/RE_CATALOGUE.md) | Reverse-engineering catalogue for `mq_player` and `mq_ui` |
+| [`docs/PRIVACY.md`](docs/PRIVACY.md) | Network behavior of the installer and on-device UI |
+| [`build/README-vendor.md`](build/README-vendor.md) | Building and packaging portable native flash tools |
+| [`SPL_SOURCE.md`](SPL_SOURCE.md) | GPL source and build recipe for the stage-1 DRAM bring-up loader |
+| [`DEPENDENCY_INVENTORY.md`](DEPENDENCY_INVENTORY.md) | Optional one-file bundle dependencies and obligations |
+| [`NOTICE.md`](NOTICE.md) / [`licenses/`](licenses/) | Third-party component and license mapping |
+| [`SECURITY.md`](SECURITY.md) | Private vulnerability reporting |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Safe contribution workflow |
+| [`agents/`](agents/) | Project brief for diskOS development |
 
 ## For developers
 
-The installer already **runs from source** - `./install.sh` then `./diskos-installer` (see
-*First-time setup*). The release tarball ships the native flash tools prebuilt in
-`vendor/<os>-<arch>/`; a fresh **git clone** does not include them (they are large binaries kept out
-of git), so build them once:
+A prepared release bundle includes native host tools under `vendor/<os>-<arch>/`. A fresh source
+checkout does not include those large binaries, so build them once:
 
 ```bash
-# Build the native flash tools into vendor/<os>-<arch>/ :
-bash build/build-usbboot-static.sh     # static usbboot   (Linux)
-bash build/build-squashfs-static.sh    # static mksquashfs/unsquashfs (Linux)
-bash build/build-macos.sh              # usbboot + libusb (run on a Mac)
+bash build/build-usbboot-static.sh
+bash build/build-squashfs-static.sh
+bash build/build-macos.sh              # run on macOS
 ```
 
-Optionally, you can package everything into a single self-contained binary (this is **not** how the
-release ships, and it bundles ~90 system libraries - see
-[`licenses/THIRD_PARTY_BUNDLED.md`](licenses/THIRD_PARTY_BUNDLED.md) before redistributing one):
+You can optionally create a self-contained binary. This is not the normal release format and
+bundles many system libraries; review [`licenses/THIRD_PARTY_BUNDLED.md`](licenses/THIRD_PARTY_BUNDLED.md)
+before redistributing it.
 
 ```bash
-bash build/build.sh                    # -> build/dist/diskos-installer (optional onefile)
+bash build/build.sh
 ```
 
-See [`build/README-vendor.md`](build/README-vendor.md) for how the native tools are produced and the
-portability requirements. Working on diskOS with an AI agent? Start with
-[`agents/AGENTS.md`](agents/AGENTS.md).
+### Building the UI
 
-## Error codes (for bug reports)
+The on-device UI source is in [`ui/`](ui/), licensed **GPL-3.0-or-later** - fork it, theme it, make
+it yours. LVGL 9.2.2 is vendored in `ui/lvgl/` (lightly customized), so all you need is a static
+`mipsel-linux-musl` toolchain; see [`ui/README.md`](ui/README.md) for the full recipe.
 
-If the installer stops with an error, it prints a short code like `[E301]`. **Quote that code**
-when reporting an issue - it tells us exactly where it stopped. In the tested cases the device
-stays reachable in mask-ROM and your saved stock image can be re-flashed, but recovery is not
-guaranteed on untested hardware or every failure mode.
+```bash
+cd ui && make    # toolchain as mipsel-linux-musl-gcc; or: make CROSS=/path/to/mipsel-linux-musl-
+```
+
+## Debug Mode
+
+<details>
+<summary><strong>Optional SSH access and security notes</strong></summary>
+
+Debug Mode is **off by default**. Open **Settings → System → Debug Mode → Enable Debug** to show an
+SSH command and a newly generated password. The password rotates each time Debug Mode is enabled.
+
+While enabled, the password is stored in plaintext at `/usr/data/sshd/current_pw` with mode `0600`
+so the UI can display it again after a restart. Disabling Debug Mode removes the file. A reboot can
+leave a stale copy, but the SSH overlay is inactive until Debug Mode is enabled again.
+
+Debug Mode uses Dropbear 2022.83, which predates the CVE-2023-48795 Terrapin Strict-KEX mitigation.
+Use it only for short sessions on a trusted network and turn it off when finished.
+
+</details>
+
+## Error codes
+
+<details>
+<summary><strong>Installer and device error reference</strong></summary>
+
+Quote the complete code in bug reports. A stopped flash can leave the root filesystem partially
+written even when the writer fails closed.
 
 | Code | Meaning |
 |---|---|
-| **E1xx** | **Environment / preflight - nothing was written to the device** |
-| E101 | Unsupported host OS/arch (Linux/macOS only) |
-| E102 | A bundled component is missing - re-download the installer |
-| E103 | A bundled tool can't run (its directory is mounted `noexec`, or a missing library) |
-| E110 | No device in mask-ROM mode (power off, hold Vol-Down, plug USB) |
-| E111 | More than one device in mask-ROM mode - unplug the others |
-| E112 | Can't confirm exactly one device (USB permissions / no libusb) |
-| E120 / E121 / E122 | Image not found / wrong size / not a squashfs |
-| E140 / E141 | No firmware `.zip` provided / no saved stock image to restore |
-| E142 | `DISKOS_INSTALLER_HOME` points at a non-empty, non-state directory |
-| **E2xx** | **Firmware extract & image build** |
-| E201 / E202 | Input isn't a zip / unsafe zip (path escape or bomb) |
-| E210 | FiiO OTA manifest missing, ambiguous, or unsafe |
-| E211 | AES-decrypt failed (wrong key or not a FiiO OTA) |
-| E212 / E213 | Rootfs chunks missing/duplicate / assembled image invalid |
-| E220 / E221 | Not a Snowsky Disc rootfs / untested firmware version |
-| E222 / E223 | diskOS UI binary invalid / boot-hook anchor problem |
-| E224 | Stock rootfs doesn't match the known-good pinned hash (modified/corrupt firmware) |
-| E230 / E231 / E232 | squashfs pack/unpack failed / image too large / output failed validation |
-| E233 | A file in the stock rootfs resolves outside it via a symlink (crafted/corrupt firmware) |
-| E240 | Stock image larger than the partition (refusing to truncate) |
-| E250 | Invalid variant (must be `public` or `dev`) |
-| **E3xx** | **Flashing (host side)** |
-| E301 | No result read back - flash outcome UNKNOWN (assume failed, re-flash) |
-| E302 | Short/truncated result readback - flash outcome UNKNOWN (assume failed, re-flash) |
-| E303 | **Flash timed out - the device stopped responding (likely reset mid-flash)** |
-| E310 | Flash verify failed - see the device code below |
-| **F1xx** | **Device writer aborted and reported a coded reason.** It fails closed rather than committing a bad block mapping, but blocks erased/written before the abort may already be modified - the rootfs can be partially written. Return to mask-ROM and re-flash or restore stock. |
-| F101…F106 | init/ECC, out-of-space, block-write fail, too many bad blocks, ECC re-enable, bad-block marker |
+| **E1xx** | Environment or preflight; nothing was written |
+| E101-E103 | Unsupported host, missing component, or tool cannot run |
+| E110-E112 | Mask-ROM device detection or permission problem |
+| E120-E142 | Image, firmware ZIP, saved stock image, or state-directory problem |
+| **E2xx** | Firmware extraction and image build |
+| E201-E224 | Unsafe archive, OTA manifest, decrypt, rootfs, version, payload, or hash problem |
+| E230-E250 | Squashfs build, size, validation, symlink, partition, or variant problem |
+| **E3xx** | Host-side flashing |
+| E301 / E302 | Missing or truncated result; outcome unknown |
+| E303 | Flash timed out |
+| E310 | Device reported a verification failure |
+| **F1xx** | Device writer aborted; return to mask-ROM and reflash or restore |
 
-Exit codes: `0` success, `1` error, `2` usage/preflight refusal (unsupported host, missing
-`--firmware`, bad arguments, or Tk unavailable for the GUI), `3` you cancelled at a prompt,
+Process exit codes are `0` success, `1` error, `2` usage or preflight refusal, `3` cancelled, and
 `130` interrupted.
 
-## Support
+</details>
 
-diskOS is a solo, open-source hobby project. If it's useful to you and you'd like to help keep the
-work going, you can leave a tip:
+## Contributing
 
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20diskOS-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/b0hemia)
+Bug reports, hardware findings, documentation fixes, and carefully scoped patches are welcome.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before changing flashing code or security-sensitive paths.
+Report vulnerabilities privately according to [`SECURITY.md`](SECURITY.md).
 
-**[ko-fi.com/b0hemia](https://ko-fi.com/b0hemia)** - entirely optional, and hugely appreciated.
+## Support the project
+
+diskOS is a solo open-source hobby project. Tips are optional, but they help keep testing,
+reverse-engineering, documentation, and release work moving.
+
+<p align="center">
+  <a href="https://ko-fi.com/b0hemia">
+    <img alt="Support diskOS on Ko-fi" src="https://img.shields.io/badge/Support%20diskOS%20on%20Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white">
+  </a>
+</p>
 
 ## License
 
-- **Original diskOS installer files** in this repo (the Python installer, build scripts, docs)
-  are **MIT** - see [`LICENSE`](LICENSE). SPDX: `MIT`.
-- **Third-party components** retain their own licenses and ship with corresponding source: the native
-  flash tools **usbboot** and **squashfs-tools** (**GPL-2.0**), the libraries they statically link
-  (**liblzo2** GPL-2.0, **libusb-1.0** LGPL-2.1, zlib/liblzma), and the stage-1 **SPL** (**GPL-2.0**).
-  The corresponding source for all of these ships in [`corresponding-source/`](corresponding-source/)
-  (SPL also in [`spl-src/`](spl-src/) + [`SPL_SOURCE.md`](SPL_SOURCE.md)); see
-  [`NOTICE.md`](NOTICE.md) for the full mapping and the relink path for the LGPL libusb.
-- **The diskOS UI (`payload/mq_ui`)** currently ships as a **binary-only** component. It is not
-  covered by the MIT license above and its source is not yet published; treat it as a redistributable
-  binary whose provenance, version, and third-party content are still being documented. If/when the
-  UI source is published this note will be updated.
+- Original installer code, scripts, and documentation are **MIT** licensed; see [`LICENSE`](LICENSE).
+- Third-party components keep their own licenses. GPL/LGPL corresponding source, notices, and
+  relinking information are included in [`corresponding-source/`](corresponding-source/),
+  [`spl-src/`](spl-src/), [`SPL_SOURCE.md`](SPL_SOURCE.md), [`NOTICE.md`](NOTICE.md), and
+  [`licenses/`](licenses/).
+- The on-device UI **source** is in [`ui/`](ui/), licensed **GPL-3.0-or-later**
+  (see [`ui/COPYING`](ui/COPYING)) - deliberately copyleft so forks stay open. Its built artifact
+  ships at `payload/mq_ui`. The UI's bundled components (LVGL, SQLite, fonts) keep their own
+  licenses; see [`ui/README.md`](ui/README.md).
 
-> **Do not redistribute the `diskos_*.bin` images the installer builds** - they contain FiiO's
-> rootfs. The installer produces them locally from *your* firmware; that is fine for your own use,
-> but sharing them would redistribute FiiO's software. Share the installer, not the built image.
+> [!WARNING]
+> Do not redistribute generated `diskos_*.bin` images. They contain FiiO's root filesystem. Build
+> them locally from firmware you obtained from FiiO and share the installer, not the resulting image.

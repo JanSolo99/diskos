@@ -1,0 +1,202 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 diskOS contributors */
+#ifndef SCREENS_H
+#define SCREENS_H
+#include "lvgl/lvgl.h"
+#include "ipc.h"
+#include <stdbool.h>
+enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_COUNT };
+void screens_init(void);
+void screen_show(int which);
+void screen_back(void);
+void screen_set_anim(int on);
+int  screen_current(void);
+void ui_toast(const char *msg);   /* transient completion-feedback message */
+lv_obj_t *screen_get_root(int which);
+/* screensaver (saver.c) */
+void saver_create(lv_obj_t *root);
+void saver_set_clock(const char *t, const char *date);
+void saver_set_weather(const char *text);
+void saver_set_track(const char *title, const char *artist, const void *backdrop_src);
+const char *ui_current_backdrop_src(void);
+/* quick settings (quicksettings.c) */
+void quicksettings_create(lv_obj_t *root);
+void quicksettings_refresh(int playing);
+/* song info (songinfo.c) */
+void songinfo_create(lv_obj_t *root);
+void songinfo_set(const track_state_t *st);
+/* Now Playing side menus (npmenus.c) + custom EQ (eqcustom.c) */
+void npmenu_create(lv_obj_t *root);
+void nphub_create(lv_obj_t *root);   /* right-swipe hub: Playback + Options buttons */
+void tune_create(lv_obj_t *root);
+void eqcustom_create(lv_obj_t *root);
+void colorpick_create(lv_obj_t *root);    /* accent colour picker screen */
+void colorpick_open(void);                /* seed sliders from cfg + show */
+void modes_create(lv_obj_t *root);        /* Working Mode (audio source) picker screen */
+void modes_open(void);                     /* refresh selection + show SCR_WORKMODE */
+/* source/working mode: 0=Local 1=USB-DAC 2=BT-Receiving 3=USB-Storage */
+int  ui_set_source_mode(int mode);         /* replay the stock V2.28 switch sequence; 0=ok -1=bad arg */
+int  ui_get_source_mode(void);
+void npmenu_set(const track_state_t *st, int playing, const void *thumb_src);
+void npmenu_close_transients(void);   /* dismiss lv_layer_top popups on navigation */
+void ui_set_favorite(int on);   /* love/unlove the current song (0104) */
+/* add-to-playlist picker (npmenus.c) */
+void plpick_create(lv_obj_t *root);
+void plpick_set_song(const char *path);   /* song to add when a playlist is tapped */
+/* playlist detail (playlistview.c) */
+void plview_create(lv_obj_t *root);
+void plview_open(long pid, const char *name);
+void plview_refresh(void);   /* rebuild the song list from the DB (called on every entry) */
+/* wifi settings (wifi.c) */
+void wifi_create(lv_obj_t *root);
+void wifi_open(void);
+int  wifi_toggle(void);        /* Quick Settings tile short-press: flip radio + persist, returns new state */
+void lastfm_open(void);                   /* Settings -> Last.fm (SCR_LASTFM) */
+void debug_open(void);                     /* Settings -> System -> Debug Mode (SCR_DEBUG) */
+void debug_create(lv_obj_t *root);
+void lastfm_create(lv_obj_t *parent);
+void wifi_init_intent(void);   /* seed wifi_on intent from stock WIFI_STATUS (first run only) */
+void wifi_supervise(void);     /* keepalive: (re)start supplicant if Wi-Fi should be on but isn't */
+void wifi_info_create(lv_obj_t *root);
+void wifi_info_open(void);
+/* bluetooth settings (bt.c) */
+void bt_create(lv_obj_t *root);
+void bt_open(void);
+int  bt_toggle(void);          /* Quick Settings tile short-press: flip BT + persist, returns new state */
+void bt_info_create(lv_obj_t *root);
+void bt_info_open(void);
+void bt_boot_restore(void);   /* at startup: re-enable BT + arm auto-route if it was on */
+void library_open_album(const char *name);
+void library_open_artist(const char *name);
+/* apps launcher (apps.c) + launch hook (main.c) */
+void apps_create(lv_obj_t *root);
+void apps_reload(void);
+void app_launch(const char *exec);
+/* settings (master list + drill-in detail) */
+void settings_create(lv_obj_t *root);
+void settings_refresh_list(void);
+void settings_apply_startup(void);
+
+/* accent plumbing: the live accent + per-screen repaint so no surface shows a stale colour */
+lv_color_t ui_current_accent(void);
+/* Standard screen header: back-chevron (tucked out of the clipped top-left) + centred title, clear of
+ * the chevron. Back taps call screen_back(). Returns the title label so screens with a DYNAMIC title
+ * (e.g. Library retitling to Songs/Albums) can update it. Use on every detail/list screen for one
+ * consistent header instead of per-screen copies. */
+lv_obj_t *ui_header(lv_obj_t *root, const char *title);
+lv_obj_t *ui_header_cb(lv_obj_t *root, const char *title, lv_event_cb_t back_cb);  /* header with custom back */
+void home_set_accent(lv_color_t accent);
+void saver_set_accent(lv_color_t accent);
+void saver_show_sync(void);   /* apply saver-style + accent immediately on saver show */
+int  saver_wants_bright(void);/* 1 = keep full brightness (vinyl art showcase), don't dim */
+int  ui_run_bounded(char *const argv[], int timeout_ms);  /* external cmd as a killable child w/ hard timeout */
+void tune_refresh(void);      /* re-sync Tune panel Play Mode/EQ labels on show */
+
+/* Audio/DAC cluster: send live command (no-op if value <0 = unmanaged). main.c. */
+void ui_set_dre(int on);
+void ui_set_gain(int high);
+void ui_set_output(int spdif);
+int  ui_route_bt(const char *mac);   /* route player audio to a connected BT speaker (by MAC) */
+int  ui_route_analog(void);          /* route player audio back to the local DAC */
+void ui_set_dac_filter(int idx);
+void ui_set_replay_gain(int v);   /* 0=Off 1=Track 2=Album */
+void ui_set_gapless(int on);
+void ui_set_memory(int mode);
+void ui_set_maxvol(int v);
+void ui_set_balance(int v);
+void ui_reapply_audio(void);  /* resend managed audio settings (DRE/filter/etc.) on player-ready / reconnect */
+void ui_request_sleep(void);  /* Quick Settings "Sleep": manual screen-off request (works with saver Off) */
+void ui_set_brightness(int v);   /* persist + apply */
+int  ui_get_brightness(void);
+void ui_backlight(int v);        /* transient backlight write, no persist */
+void ui_set_sleep_timer(int minutes);   /* 0 = off; pauses playback when it elapses */
+void setting_detail_create(lv_obj_t *root);
+void setting_detail_refresh(void);
+void settings_open_detail(int idx);
+/* reusable on-screen keyboard modal (kbinput.c) */
+typedef void (*kbinput_done_cb_t)(const char *text);  /* text=NULL if cancelled/empty */
+void kbinput_open(const char *title, const char *initial, kbinput_done_cb_t cb);
+/* same modal, but the text field is masked (dots) - for secrets like Wi-Fi passwords. */
+void kbinput_open_password(const char *title, const char *initial, kbinput_done_cb_t cb);
+int  kbinput_active(void);   /* 1 while the modal keyboard is up (suppress gestures) */
+/* search */
+void search_create(lv_obj_t *root);
+void ui_clock_refresh(void);
+/* IPC decode seams (frames wired in once decoded) */
+void ui_seek_to(long ms);
+int  ui_set_volume(int vol);   /* set absolute volume 0..VOL_MAX; returns 0=queued, -1=failed */
+void ui_set_workmode(int mode);
+void ui_apply_eq(int preset);
+void ui_rescan_library(void);
+void ui_invalidate_play_scope(void);   /* clear LIST_SONG_0 scope cache after a list-content edit */
+/* play a library list (0100): list_type 0=all,2=artist,3=album,10=genre;
+ * name = artist/album/genre (NULL/"" for all); pos1 = 1-based start track. */
+void ui_play_list(int list_type, const char *name, int pos1);
+void ui_play_playlist(long pid, int pos);
+/* swipe sensitivity (px of horizontal travel needed for a back-swipe); lower = more sensitive */
+void ui_set_swipe_thresh(int px);
+void ui_apply_swipe_thresh(int px);   /* live apply, no persist (for slider drag) */
+int  ui_get_swipe_thresh(void);
+/* now playing (ui.c) */
+void ui_create(lv_obj_t *root);
+void ui_update(const track_state_t *st);
+void ui_art_poll(lv_timer_t *t);          /* apply a finished album-art decode (main thread) */
+void ui_start_art_prewarm(void);          /* spawn the background cover/accent prewarm sweep */
+void ui_set_accent_config(int mode, int rgb);  /* 0=dynamic / 1=static(rgb); applies immediately */
+int  ui_accent_is_static(void);
+void ui_set_prewarm_mode(int m);          /* 0=off 1=idle 2=charging 3=idle|charging */
+int  ui_main_is_idle(void);               /* main.c: 1 when the screen is dimmed/off (no active use) */
+const lv_font_t *ui_font_cjk(int size);   /* shared montserrat + Source Han Sans fallback user-text font (14/16/20) */
+int  ui_take_art_applied(void);           /* 1 once after art (re)applied -> re-push surfaces */
+int  ui_np_seek_press(int x, int y);
+int  ui_np_seek_move(int x, int y);
+int  ui_np_seek_release(int x, int y);
+/* full-screen album-art view (stock cover.png reuse): tap the NP cover to open */
+void ui_np_fsart_open(void);
+void ui_np_fsart_close(void);
+int  ui_np_fsart_active(void);   /* 1 while the full-screen art is up (suppress NP seek/nav) */
+const char *ui_current_cover_src(void);
+const void *ui_current_cover_dsc(void);   /* rotatable cover for vinyl saver */
+void saver_vinyl_spin(int want);          /* drive saver vinyl spin (from main loop) */
+const char *ui_current_thumb_src(void);
+void ui_set_np_style(int vinyl);   /* 0 = cover (rounded square), 1 = vinyl (disc) */
+void ui_vinyl_spin(int want);      /* drive the vinyl spin from the main loop */
+void ui_show_volume(int vol);      /* show the on-screen volume bar (auto-hides) */
+/* home */
+void home_create(lv_obj_t *root);
+void home_set_clock(const char *t, const char *s);
+void home_set_status(int batt, int charging, int wifi, int bt);
+void home_set_weather(const char *text);
+/* weather.c */
+void weather_fetch_async(void);
+void weather_poll(lv_timer_t *t);
+void weather_set_enabled(int on);   /* Settings: on/off passive weather + background fetch */
+void weather_app_create(lv_obj_t *root);   /* Weather app: set location */
+void weather_app_open(void);               /* refresh + show the weather app */
+/* lyrics.c */
+void lyrics_create(lv_obj_t *root);
+void lyrics_open(void);                     /* fetch current track lyrics + show */
+void lyrics_poll(lv_timer_t *t);            /* apply a finished fetch (main thread) */
+void home_set_now_playing(const char *title, const char *artist, lv_color_t accent, bool playing);
+void home_set_art_src(const void *src);
+void home_set_backdrop(const char *src);   /* full-screen blurred album backdrop on Home */
+typedef void (*home_settings_click_cb_t)(void);
+void home_set_settings_click_cb(home_settings_click_cb_t cb);
+/* library */
+void library_create(lv_obj_t *root);
+typedef void (*library_song_click_cb_t)(int index);  /* index = song id */
+void library_set_song_click_cb(library_song_click_cb_t cb);
+void library_refresh(void);   /* rebuild the current Library view (after external DB changes) */
+void library_ensure_capacity(void);  /* grow row buffers to fit the library (after a rescan adds tracks) */
+/* primary scrollable list per long-list screen (for rim-scroll); NULL if none */
+lv_obj_t *library_scroller(void);
+void library_scroll_letter_tick(void);   /* flash the current A-Z position while rim-scrolling */
+lv_obj_t *playlistview_scroller(void);
+lv_obj_t *search_scroller(void);
+lv_obj_t *apps_scroller(void);
+void search_set_song_click_cb(library_song_click_cb_t cb);  /* tap a search result -> play it */
+/* current album/artist/genre drill context (player list_type 3/2/10); 0 if flat */
+int  library_drill_context(int *list_type, char *name, int cap);
+/* step one level back within the library; 0 if already at the top menu */
+int  library_back(void);
+#endif
