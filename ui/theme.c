@@ -6,6 +6,8 @@
 #include <strings.h>
 #include <stdio.h>
 #include <dirent.h>
+#include <unistd.h>
+#include "fileutil.h"
 
 /* ---- palettes -----------------------------------------------------------
  * DARK is the original diskOS palette (Apple's dark system greys on true black -
@@ -182,51 +184,85 @@ int theme_font_list(char names[][64], int cap)
     return n;
 }
 
-/* Copy `src` to the NAND cache, atomically (temp file + rename), so a power cut
- * mid-copy can never leave a half-written face that renders as garbage. */
-static int font_cache_store(const char *src)
+/* The cache is one file, so on its own it cannot say WHICH face it holds. A sidecar
+ * records the name, and theme_font_init() only adopts the cache when that matches the
+ * configured font - otherwise a hand-edited config, or a cfg write that failed after
+ * the copy, leaves the UI rendering one typeface while the Font screen ticks another
+ * (and tapping the right one is then a no-op, because it already looks selected). */
+#define FONT_CACHE_NAME FONT_CACHE ".name"
+
+static int font_cache_name(char *out, int cap)
 {
-    FILE *in = fopen(src, "rb");
-    if(!in) return 0;
-    fseek(in, 0, SEEK_END);
-    long sz = ftell(in);
-    if(sz <= 0 || sz > FONT_CACHE_MAX){ fclose(in); return 0; }
-    rewind(in);
+    FILE *f = fopen(FONT_CACHE_NAME, "r");
+    if(!f) return 0;
+    out[0] = 0;
+    if(!fgets(out, cap, f)){ fclose(f); return 0; }
+    fclose(f);
+    char *nl = strpbrk(out, "\r\n");
+    if(nl) *nl = 0;
+    return out[0] ? 1 : 0;
+}
 
-    char tmp[160];
-    snprintf(tmp, sizeof tmp, "%s.tmp", FONT_CACHE);
-    FILE *out = fopen(tmp, "wb");
-    if(!out){ fclose(in); return 0; }
-
-    char buf[8192];
-    size_t n, total = 0;
-    int ok = 1;
-    while((n = fread(buf, 1, sizeof buf, in)) > 0){
-        if(fwrite(buf, 1, n, out) != n){ ok = 0; break; }
-        total += n;
+/* 1 when the cache holds `name` and is openable - i.e. selecting `name` again would
+ * change nothing. */
+int theme_font_is_installed(const char *name)
+{
+    if(!name || !name[0]) return 0;
+    if(!strcasecmp(name, "Built-in")){
+        FILE *f = fopen(FONT_CACHE, "rb");
+        if(f){ fclose(f); return 0; }        /* a cache still present means NOT built-in */
+        return 1;
     }
-    if(ferror(in)) ok = 0;
-    if(fflush(out) != 0) ok = 0;
-    fclose(in);
-    fclose(out);
-    if(ok && total != (size_t)sz) ok = 0;            /* short read: not the whole face */
-    if(!ok || rename(tmp, FONT_CACHE) != 0){ remove(tmp); return 0; }
-    return 1;
+    char have[64];
+    if(!font_cache_name(have, sizeof have) || strcmp(have, name) != 0) return 0;
+    FILE *f = fopen(FONT_CACHE, "rb");
+    if(!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fclose(f);
+    return sz > 0;
 }
 
 int theme_font_install(const char *name)
 {
     if(!name || !name[0] || !strcasecmp(name, "Built-in")){
         remove(FONT_CACHE);                          /* back to the built-in face */
+        remove(FONT_CACHE_NAME);
         return 1;
     }
     char src[192];
     if(!font_resolve(name, src, sizeof src)) return 0;   /* not on the card (any more) */
-    return font_cache_store(src);
+    /* Drop the sidecar FIRST: if the copy then fails or is cut short, the cache is
+     * unclaimed rather than claiming to be a face it is not. */
+    remove(FONT_CACHE_NAME);
+    if(file_copy_atomic(src, FONT_CACHE, FONT_CACHE_MAX) != 0) return 0;
+    FILE *f = fopen(FONT_CACHE_NAME, "w");
+    if(!f){ remove(FONT_CACHE); return 0; }
+    int ok = (fprintf(f, "%s\n", name) > 0);
+    if(fflush(f) != 0) ok = 0;
+    if(ok && fsync(fileno(f)) != 0) ok = 0;
+    fclose(f);
+    if(!ok){ remove(FONT_CACHE_NAME); remove(FONT_CACHE); return 0; }
+    return 1;
 }
 
 void theme_font_init(void)
 {
+#if LV_USE_TINY_TTF
+    /* Drop any faces created for a PREVIOUS selection: instances are cached per size,
+     * so without this a re-init keeps handing out the old typeface while reporting the
+     * new one, and leaks a face per size per change.
+     *
+     * PRECONDITION: no live widget may still reference a face from the previous call.
+     * th_font() hands lv_font_t pointers straight to lv_obj_set_style_text_font(), and
+     * screenmgr keeps every screen root alive for the life of the process - so calling
+     * this after screens_init() without rebuilding the whole widget tree first is a
+     * use-after-free on the next repaint. The running UI calls it exactly once, before
+     * any screen exists (main.c); a font change re-execs instead of re-initialising.
+     * tests/fontcheck.c calls it repeatedly, and builds no widgets. */
+    for(int i = 0; i < g_ttf_n; i++) if(g_ttf[i].f) lv_tiny_ttf_destroy(g_ttf[i].f);
+    g_ttf_n = 0;
+#endif
     g_scale = cfg_get_int("font_scale", 0);
     if(g_scale < -2) g_scale = -2;
     if(g_scale >  2) g_scale =  2;
@@ -240,8 +276,7 @@ void theme_font_init(void)
         /* The NAND copy first - it is the one that exists this early in boot. Falling
          * back to the card covers a config edited by hand, or a cache lost to a
          * factory reset, at whatever point in the session the card turns up. */
-        FILE *f = fopen(FONT_CACHE, "rb");
-        if(f){ fclose(f); snprintf(g_font_file, sizeof g_font_file, "%s", FONT_CACHE); }
+        if(theme_font_is_installed(want)) snprintf(g_font_file, sizeof g_font_file, "%s", FONT_CACHE);
         else if(!font_resolve(want, g_font_file, sizeof g_font_file)) g_font_file[0] = 0;
 
         if(g_font_file[0]){

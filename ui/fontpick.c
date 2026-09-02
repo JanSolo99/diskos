@@ -4,6 +4,8 @@
 #include "config.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdatomic.h>
+#include <pthread.h>
 #include <unistd.h>   /* readlink/execv/sync: the UI re-exec that applies theme + font */
 
 /* Font picker: choose the UI typeface.
@@ -34,24 +36,79 @@ static void restart_now(lv_timer_t *t)
     ui_toast("Couldn't restart the UI");
 }
 
+/* ---- installing a font runs OFF the LVGL thread -----------------------------
+ * Adopting a font copies it from the SD card to internal storage, and a CJK face can
+ * be several megabytes off a slow card. bt.c documents what happens if you do that
+ * kind of work inline here: "running that inline froze the LVGL loop for seconds (H5)
+ * and risked the fiio_init hardware watchdog". So the copy runs on a detached worker
+ * that touches no LVGL state, and a timer on the main thread picks up the result.
+ *
+ * The choice is persisted only once the face is actually on internal storage, so a
+ * failed copy can never leave a saved font that silently renders as the built-in one. */
+static _Atomic int g_inst_busy;      /* 1 while a worker is in flight */
+static _Atomic int g_inst_done;      /* worker finished */
+static _Atomic int g_inst_ok;        /* ...and whether it worked */
+static char        g_inst_name[64];  /* written by main before the worker starts; worker reads only */
+static lv_timer_t *g_inst_poll;
+
+static void *install_worker(void *arg)
+{
+    (void)arg;
+    int ok = theme_font_install(g_inst_name);
+    atomic_store(&g_inst_ok, ok);
+    atomic_store(&g_inst_done, 1);
+    return NULL;
+}
+
+static void install_poll_cb(lv_timer_t *t)
+{
+    if(!atomic_load(&g_inst_done)) return;
+    lv_timer_del(t);
+    g_inst_poll = NULL;
+    atomic_store(&g_inst_busy, 0);
+    if(!atomic_load(&g_inst_ok)){
+        ui_toast("Couldn't load that font");
+        return;                                   /* nothing persisted, nothing changed */
+    }
+    cfg_set_str("font_file", g_inst_name);
+    ui_toast("Applying font\xE2\x80\xA6");
+    lv_timer_t *r = lv_timer_create(restart_now, 900, NULL);
+    lv_timer_set_repeat_count(r, 1);
+}
+
+static void install_start(const char *name)
+{
+    int expected = 0;
+    if(!atomic_compare_exchange_strong(&g_inst_busy, &expected, 1)) return;   /* one at a time */
+    snprintf(g_inst_name, sizeof g_inst_name, "%s", name);
+    atomic_store(&g_inst_done, 0);
+    atomic_store(&g_inst_ok, 0);
+
+    pthread_t th;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&at, 64*1024);
+    int rc = pthread_create(&th, &at, install_worker, NULL);
+    pthread_attr_destroy(&at);
+    if(rc != 0){ atomic_store(&g_inst_busy, 0); ui_toast("Couldn't load that font"); return; }
+
+    ui_toast("Installing font\xE2\x80\xA6");
+    if(!g_inst_poll) g_inst_poll = lv_timer_create(install_poll_cb, 120, NULL);
+}
+
 static void pick_cb(lv_event_t *e)
 {
     if(lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     const char *want = (i < 0) ? "Built-in" : g_names[i];
-    if(!strcmp(want, theme_font_name())) { screen_back(); return; }   /* already active */
-    /* Copy to internal storage BEFORE persisting the choice: the card is mounted
-     * asynchronously and is not there at boot, so the card copy is not what will be
-     * loaded. If the copy fails, change nothing - a persisted choice that silently
-     * renders as the built-in face is worse than saying so. */
-    if(!theme_font_install(want)){
-        ui_toast("Couldn't load that font");
-        return;
-    }
-    cfg_set_str("font_file", want);
-    ui_toast("Applying font\xE2\x80\xA6");
-    lv_timer_t *t = lv_timer_create(restart_now, 900, NULL);
-    lv_timer_set_repeat_count(t, 1);
+    /* "Already active" has to mean the face is REALLY installed, not merely named in
+     * the config: a configured font with no cache behind it (upgraded from a build
+     * without one, or a cache lost to a factory reset) renders as built-in at every
+     * cold boot, and a name-only check would make its own row a no-op - leaving no
+     * way to repair it from the picker at all. */
+    if(!strcmp(want, theme_font_name()) && theme_font_is_installed(want)){ screen_back(); return; }
+    install_start(want);
 }
 
 static lv_obj_t *row(const char *label, const char *sub, int idx, int selected)

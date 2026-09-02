@@ -700,7 +700,13 @@ static void walk(const char *dir, int depth){
             /* publish before the (slow) tag read, so the name on screen is the file
              * actually being worked on rather than the previous one */
             pthread_mutex_lock(&g_mu);
-            snprintf(g_curname, sizeof g_curname, "%s", e->d_name);
+            /* Deliberate truncation: this is a progress label on a 360px screen, not a
+             * path. Copied explicitly rather than via snprintf so the intent is in the
+             * code and the compiler does not have to guess (-Wformat-truncation). */
+            size_t nlen = strlen(e->d_name);
+            if(nlen >= sizeof g_curname) nlen = sizeof g_curname - 1;
+            memcpy(g_curname, e->d_name, nlen);
+            g_curname[nlen] = 0;
             pthread_mutex_unlock(&g_mu);
             upsert_song(path, e->d_name);
         }

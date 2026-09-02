@@ -76,5 +76,9 @@ int              theme_font_list(char names[][64], int cap);
  * loaded. Returns 0 if the file is gone or the copy failed - in which case the
  * caller must not switch. */
 int              theme_font_install(const char *name);
+/* 1 when `name` is already the installed face (so re-selecting it would be a no-op).
+ * Checks the cached copy, not just the configured name - a name with no valid cache
+ * behind it must still be installable. */
+int              theme_font_is_installed(const char *name);
 
 #endif

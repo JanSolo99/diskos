@@ -245,7 +245,15 @@ void ui_restart_self(int flush_config)
     ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     if(n <= 0) return;
     self[n] = 0;
-    char *av[] = { self, (char *)"--ui-restart", NULL };
+    /* The marker goes in the ENVIRONMENT, never in argv. fiio_init's watchdog finds us
+     * by process name - main()'s argv[0] normaliser exists precisely because getting
+     * that match wrong made the watchdog kill diskOS and respawn the stock UI - and an
+     * extra argv element would change the command line it inspects. The environment is
+     * not part of that, carries the same "cannot be left stale" property (it exists
+     * only in the image we are about to exec), and needs no second exec: passing the
+     * bare name as argv[0] means the normaliser has nothing to fix. */
+    setenv("DISKOS_UI_RESTART", "1", 1);
+    char *av[] = { (char *)"mq_ui", NULL };
     execv(self, av);
 }
 
@@ -567,6 +575,11 @@ static void usb_connect_watch(lv_timer_t *t)
 
     int host_has_card = sd_exported_to_host();
     if(g_source_mode == 3){
+        /* While a user-chosen storage session is up, keep the unrequested-export
+         * detector armed. Leaving it disarmed here meant a prompt already answered
+         * earlier in the session silenced the NEXT one: switch back to Local by hand
+         * while still plugged in, let the player re-export, and nothing would fire. */
+        armed = 1;
         /* A storage session the user asked for. Track whether it actually came up, so
          * that a Storage selection which never exports (no host, slow gadget) is not
          * mistaken below for a session that has ended. */
@@ -576,10 +589,16 @@ static void usb_connect_watch(lv_timer_t *t)
          * Local Playback for real rather than just editing our mirror to say so - the
          * mirror would then claim Local while the player sat in a mode that will not
          * play, which is the confusion this whole path exists to remove. Local is
-         * documented as always re-issuable, and this fires once per session. */
-        saw_user_export = 0;
+         * documented as always re-issuable.
+         *
+         * Clear the session flag ONLY on success: ui_set_source_mode() bails out
+         * without changing anything if a frame will not queue (a full queue, or the
+         * player restarting), and clearing first would take the retry with it - leaving
+         * the mirror stuck on Storage until the UI restarts. */
         armed = 1;
-        if(ui_set_source_mode(0) == 0) ui_toast("Back to local playback");
+        if(ui_set_source_mode(0) != 0) return;             /* try again on the next tick */
+        saw_user_export = 0;
+        ui_toast("Back to local playback");
         return;
     }
     saw_user_export = 0;
@@ -1390,8 +1409,11 @@ int main(int argc, char **argv){
      * hand-off below: with Default UI = Stock - i.e. the user normally boots stock and
      * reached diskOS by holding Vol-Up - Vol-Up is obviously not held now, so changing
      * the theme would silently launch the STOCK UI. The marker says "this is a restart,
-     * not a boot"; it lives in argv rather than a flag file so it cannot be left stale. */
-    int is_ui_restart = (argc > 1 && !strcmp(argv[1], "--ui-restart"));
+     * not a boot"; it is an environment variable rather than a flag file so it cannot be
+     * left stale, and unlike an argv element it does not alter the command line that
+     * fiio_init's watchdog matches us by. */
+    int is_ui_restart = (getenv("DISKOS_UI_RESTART") != NULL);
+    unsetenv("DISKOS_UI_RESTART");   /* consume it: never inherited by a launched app */
     if(!is_ui_restart)
     {
         int flag_stock = (access("/usr/data/boot_default_stock", F_OK) == 0);

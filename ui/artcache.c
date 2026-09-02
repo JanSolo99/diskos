@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "artcache.h"
+#include "fileutil.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -38,26 +39,9 @@ static void cache_paths(const char *fp, char *cv, char *th, char *bg, int cap){
     snprintf(th,cap,"%s/%s/t.bmp",CACHE_ROOT,fp);
     snprintf(bg,cap,"%s/%s/b.bmp",CACHE_ROOT,fp);
 }
-static int copy_file(const char *src, const char *dst){
-    FILE *in=fopen(src,"rb"); if(!in) return -1;
-    /* unique tmp per call: a live decode + a prewarm decode can copy the SAME dst
-     * concurrently; a shared "<dst>.tmp" would let them interleave and expose a
-     * partial file. Unique tmp + the atomic rename below means dst is only ever
-     * replaced by a complete file. */
-    static _Atomic unsigned g_tmp_ctr = 0;
-    unsigned seq = atomic_fetch_add(&g_tmp_ctr, 1u);
-    char tmp[600]; snprintf(tmp,sizeof tmp,"%s.tmp%u",dst,seq);
-    FILE *out=fopen(tmp,"wb"); if(!out){ fclose(in); return -1; }
-    char buf[16384]; size_t n; int ok=1;
-    while((n=fread(buf,1,sizeof buf,in))>0){ if(fwrite(buf,1,n,out)!=n){ ok=0; break; } }
-    if(ferror(in)) ok=0;                       /* read error mid-copy -> don't publish a truncated file */
-    fclose(in);
-    if(fflush(out)!=0) ok=0;
-    fclose(out);
-    if(!ok){ unlink(tmp); return -1; }
-    if(rename(tmp,dst)!=0){ unlink(tmp); return -1; }
-    return 0;
-}
+/* atomic+durable copy lives in fileutil.c, shared with the user-font cache */
+static int copy_file(const char *src, const char *dst){ return file_copy_atomic(src, dst, 0); }
+
 static int enough_free(void){
     struct statvfs v;
     if(statvfs("/tmp/sdcard", &v) != 0) return 0;     /* unknown -> don't cache */

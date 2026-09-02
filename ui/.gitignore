@@ -19,3 +19,7 @@ touchdisc
 # Font source blobs (fonts are shipped as generated font_*.c arrays)
 *.ttf
 config.mk
+
+# host test artifacts (see tests/README.md)
+fontcheck
+tests/sdcard/

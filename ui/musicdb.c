@@ -381,6 +381,39 @@ int mdb_albums(char names[][MDB_STR], char artists[][MDB_STR], int *counts, int 
     return n;
 }
 
+/* Track count for one album, from the cache mdb_albums() builds (sorted by name,
+ * case-insensitively). Returns 0 if the cache has not been built yet or the album is
+ * not in it - callers use this for a display count, never for indexing. */
+/* The album cache is built lazily by mdb_albums(). Reaching an artist's albums without
+ * ever opening the Albums view would otherwise find it empty and report every count as
+ * zero, so build it here on demand - with our own scratch, since mdb_albums() uses the
+ * caller's arrays as working space. Paid once; the Albums view then gets it for free. */
+static void albums_cache_ensure(void)
+{
+    if(g_calb_n >= 0) return;                 /* already built (0 albums counts as built) */
+    int cap = g_n > 0 ? g_n : 1;              /* distinct albums can never exceed songs */
+    char (*nm)[MDB_STR] = malloc((size_t)cap * MDB_STR);
+    char (*ar)[MDB_STR] = malloc((size_t)cap * MDB_STR);
+    int  *ct            = malloc((size_t)cap * sizeof(int));
+    if(nm && ar && ct) mdb_albums(nm, ar, ct, cap);   /* builds and caches as a side effect */
+    free(nm); free(ar); free(ct);
+}
+
+static int album_track_count(const char *album)
+{
+    albums_cache_ensure();
+    if(g_calb_n <= 0 || !g_calb || !g_calb_ct || !album) return 0;
+    const char (*names)[MDB_STR] = (const char (*)[MDB_STR])g_calb;
+    int lo = 0, hi = g_calb_n - 1;
+    while(lo <= hi){
+        int mid = lo + (hi - lo) / 2;
+        int c = strcasecmp(album, names[mid]);
+        if(c == 0) return g_calb_ct[mid];
+        if(c < 0) hi = mid - 1; else lo = mid + 1;
+    }
+    return 0;
+}
+
 /* qsort comparator over the flat names[][MDB_STR] array (case-insensitive) */
 static int mdb_name_ci_cmp(const void *a, const void *b){ return strcasecmp((const char*)a, (const char*)b); }
 
@@ -500,18 +533,13 @@ int mdb_artist_albums(const char *artist, char names[][MDB_STR], int *counts, in
 
     /* Count the FULL album, not just this artist's share of it: opening one of these
      * rows shows the whole album (that is what an album is, and the only scope the
-     * player can queue), so the number beside it has to describe the same thing. One
-     * pass over the library with a binary search into the sorted album list. */
-    for(int i=0;i<g_n;i++){
-        if(!g_songs[i].album[0]) continue;
-        int lo = 0, hi = n - 1;
-        while(lo <= hi){
-            int mid = lo + (hi - lo) / 2;
-            int c = strcasecmp(g_songs[i].album, names[mid]);
-            if(c == 0){ counts[mid]++; break; }
-            if(c < 0) hi = mid - 1; else lo = mid + 1;
-        }
-    }
+     * player can queue), so the number beside it has to describe the same thing.
+     *
+     * Take those totals from the album cache instead of sweeping the library again.
+     * mdb_albums() already computed every album's track count once and keeps it sorted
+     * by name, so this is a binary search per album rather than another O(songs) pass -
+     * this runs inline on the LVGL thread every time an artist is opened. */
+    for(int i=0;i<n;i++) counts[i] = album_track_count(names[i]);
     return n;
 }
 
