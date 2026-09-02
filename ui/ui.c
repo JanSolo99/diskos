@@ -369,13 +369,31 @@ lv_color_t ui_current_accent(void){ return accent; }
 
 /* ---- shared standard header (back chevron + centred title) ------------------------------------- */
 static void ui_header_back_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) screen_back(); }
+
 /* Long-press the back chevron on ANY screen -> straight Home, however deep you are.
- * A short press still steps back one rung (or runs the screen's own back handler),
- * so this adds an escape hatch without changing what the chevron already did. */
+ * A short press still steps back one rung (or runs the screen's own back handler).
+ *
+ * LVGL sends LV_EVENT_CLICKED on release whatever the press duration - LONG_PRESSED does
+ * not replace it - so a long press would otherwise go Home AND then run the back handler,
+ * which on the Library also rewinds its internal view stack behind your back. The tiles
+ * elsewhere in this UI avoid that by listening on SHORT_CLICKED, but the header's back
+ * handler is supplied by the caller and every one of them tests for CLICKED, so instead
+ * the long press marks the release that follows it as spent.
+ *
+ * The flag is armed fresh on every PRESSED, so a long press that ends in a drag-off
+ * (PRESS_LOST, no CLICKED) cannot leave it set to eat the next real back tap. */
+static int s_hdr_click_spent;
+static void ui_header_press_cb(lv_event_t *e){ (void)e; s_hdr_click_spent = 0; }
 static void ui_header_home_cb(lv_event_t *e){
     if(lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
+    s_hdr_click_spent = 1;
     screen_home();
     ui_toast("Home");
+}
+/* Sits in front of the caller's back handler; swallows the release of a long press. */
+static void ui_header_click_gate_cb(lv_event_t *e){
+    if(lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if(s_hdr_click_spent){ s_hdr_click_spent = 0; lv_event_stop_processing(e); }
 }
 /* full form: custom back handler (e.g. Library pops its view stack before leaving the screen). */
 lv_obj_t *ui_header_cb(lv_obj_t *root, const char *title, lv_event_cb_t back_cb)
@@ -387,6 +405,10 @@ lv_obj_t *ui_header_cb(lv_obj_t *root, const char *title, lv_event_cb_t back_cb)
     lv_obj_set_style_radius(back, 20, 0);
     lv_obj_set_style_bg_color(back, th_card(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(back, LV_OPA_70, LV_STATE_PRESSED);
+    /* Order matters: the gate is registered FIRST so it runs before the back handler
+     * and can stop the event when the click is a long press's release. */
+    lv_obj_add_event_cb(back, ui_header_press_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(back, ui_header_click_gate_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(back, back_cb ? back_cb : ui_header_back_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(back, ui_header_home_cb, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_t *ic = lv_label_create(back);

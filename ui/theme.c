@@ -109,6 +109,20 @@ static const int BUILTIN_SZ[] = { 8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38
 #ifndef FONT_ROOT
 #define FONT_ROOT  "/tmp/sdcard"
 #endif
+/* Where the CHOSEN font actually lives once selected.
+ *
+ * The card is mounted by an async worker that main() kicks off milliseconds before
+ * theme_font_init() runs, so at cold boot /tmp/sdcard is not there yet - resolving
+ * the face straight off the card would fail on every single power-on and silently
+ * revert to the built-in font. Fonts are also the kind of thing you set once and
+ * forget, and the card can be pulled.
+ *
+ * So selecting a font COPIES it to NAND, which is always mounted, and that copy is
+ * what gets loaded. Discovery still scans the card. */
+#ifndef FONT_CACHE
+#define FONT_CACHE "/usr/data/diskos_font.ttf"
+#endif
+#define FONT_CACHE_MAX (12*1024*1024)   /* refuse anything absurd; NAND is small */
 
 static int   g_scale;                     /* -2..+2 design-size steps */
 static char  g_font_file[128];            /* POSIX path of the loaded TTF, "" = built-in */
@@ -168,6 +182,49 @@ int theme_font_list(char names[][64], int cap)
     return n;
 }
 
+/* Copy `src` to the NAND cache, atomically (temp file + rename), so a power cut
+ * mid-copy can never leave a half-written face that renders as garbage. */
+static int font_cache_store(const char *src)
+{
+    FILE *in = fopen(src, "rb");
+    if(!in) return 0;
+    fseek(in, 0, SEEK_END);
+    long sz = ftell(in);
+    if(sz <= 0 || sz > FONT_CACHE_MAX){ fclose(in); return 0; }
+    rewind(in);
+
+    char tmp[160];
+    snprintf(tmp, sizeof tmp, "%s.tmp", FONT_CACHE);
+    FILE *out = fopen(tmp, "wb");
+    if(!out){ fclose(in); return 0; }
+
+    char buf[8192];
+    size_t n, total = 0;
+    int ok = 1;
+    while((n = fread(buf, 1, sizeof buf, in)) > 0){
+        if(fwrite(buf, 1, n, out) != n){ ok = 0; break; }
+        total += n;
+    }
+    if(ferror(in)) ok = 0;
+    if(fflush(out) != 0) ok = 0;
+    fclose(in);
+    fclose(out);
+    if(ok && total != (size_t)sz) ok = 0;            /* short read: not the whole face */
+    if(!ok || rename(tmp, FONT_CACHE) != 0){ remove(tmp); return 0; }
+    return 1;
+}
+
+int theme_font_install(const char *name)
+{
+    if(!name || !name[0] || !strcasecmp(name, "Built-in")){
+        remove(FONT_CACHE);                          /* back to the built-in face */
+        return 1;
+    }
+    char src[192];
+    if(!font_resolve(name, src, sizeof src)) return 0;   /* not on the card (any more) */
+    return font_cache_store(src);
+}
+
 void theme_font_init(void)
 {
     g_scale = cfg_get_int("font_scale", 0);
@@ -175,11 +232,19 @@ void theme_font_init(void)
     if(g_scale >  2) g_scale =  2;
 
     g_font_file[0] = 0;
+    g_font_lvpath[0] = 0;
     snprintf(g_font_name, sizeof g_font_name, "Built-in");
 #if LV_USE_TINY_TTF
     const char *want = cfg_get_str("font_file", "");
     if(want && want[0] && strcasecmp(want, "Built-in") != 0){
-        if(font_resolve(want, g_font_file, sizeof g_font_file)){
+        /* The NAND copy first - it is the one that exists this early in boot. Falling
+         * back to the card covers a config edited by hand, or a cache lost to a
+         * factory reset, at whatever point in the session the card turns up. */
+        FILE *f = fopen(FONT_CACHE, "rb");
+        if(f){ fclose(f); snprintf(g_font_file, sizeof g_font_file, "%s", FONT_CACHE); }
+        else if(!font_resolve(want, g_font_file, sizeof g_font_file)) g_font_file[0] = 0;
+
+        if(g_font_file[0]){
             snprintf(g_font_name, sizeof g_font_name, "%s", want);
             /* lv_tiny_ttf_create_file() opens through LVGL's virtual filesystem, NOT
              * through fopen(), so it needs a DRIVE-LETTER path. Handing it the bare
@@ -188,12 +253,9 @@ void theme_font_init(void)
              * LV_FS_STDIO_LETTER is 'A' (lv_conf.h), matching the "A:/tmp/..." form
              * the album-art code already uses. */
             snprintf(g_font_lvpath, sizeof g_font_lvpath, "A:%s", g_font_file);
-        } else {
-            /* the card was swapped or the file renamed: fall back silently to the
-             * built-in face rather than rendering an empty UI. */
-            g_font_file[0] = 0;
-            g_font_lvpath[0] = 0;
         }
+        /* else: the card was swapped and there is no cache - fall back silently to the
+         * built-in face rather than rendering an empty UI. */
     }
 #endif
 }

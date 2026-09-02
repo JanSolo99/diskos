@@ -70,5 +70,11 @@ int              theme_font_scale(void);  /* -2..+2 steps, 0 = design size */
 const char      *theme_font_name(void);   /* "Built-in" or the TTF's filename */
 /* Enumerate .ttf/.otf files on the SD card (root + a /Fonts dir). Returns count. */
 int              theme_font_list(char names[][64], int cap);
+/* Adopt `name` (a file from theme_font_list, or "Built-in") by copying it to internal
+ * storage. Must be called BEFORE persisting the choice: the card is mounted
+ * asynchronously and is not available at boot, so the copy is what actually gets
+ * loaded. Returns 0 if the file is gone or the copy failed - in which case the
+ * caller must not switch. */
+int              theme_font_install(const char *name);
 
 #endif

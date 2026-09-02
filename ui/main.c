@@ -245,7 +245,7 @@ void ui_restart_self(int flush_config)
     ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     if(n <= 0) return;
     self[n] = 0;
-    char *av[] = { self, NULL };
+    char *av[] = { self, (char *)"--ui-restart", NULL };
     execv(self, av);
 }
 
@@ -561,18 +561,30 @@ static void usb_connect_watch(lv_timer_t *t)
 {
     (void)t;
     static int armed = 1;                 /* 1 = not currently in an unrequested export */
-    int exported = (g_source_mode == 0) && sd_exported_to_host();
+    static int saw_user_export = 0;       /* a user-chosen storage session actually came up */
     uint32_t at = atomic_load(&g_source_switch_at);
     if(at && lv_tick_elaps(at) < SOURCE_SETTLE_MS) return;   /* our own switch still settling */
 
-    if(!exported){
-        armed = 1;                        /* unplugged / back to local: re-arm */
-        /* A storage session the user chose ends when the host lets go. Clear the
-         * mirror then, or the next connection looks like "we are already in storage
-         * mode" and is never noticed - so the prompt would appear only once per boot. */
-        if(g_source_mode == 3 && !sd_exported_to_host()) g_source_mode = 0;
+    int host_has_card = sd_exported_to_host();
+    if(g_source_mode == 3){
+        /* A storage session the user asked for. Track whether it actually came up, so
+         * that a Storage selection which never exports (no host, slow gadget) is not
+         * mistaken below for a session that has ended. */
+        if(host_has_card){ saw_user_export = 1; return; }
+        if(!saw_user_export) return;                       /* not up yet - wait, don't bounce */
+        /* It was up and now it is not: the computer let go. Put the player back into
+         * Local Playback for real rather than just editing our mirror to say so - the
+         * mirror would then claim Local while the player sat in a mode that will not
+         * play, which is the confusion this whole path exists to remove. Local is
+         * documented as always re-issuable, and this fires once per session. */
+        saw_user_export = 0;
+        armed = 1;
+        if(ui_set_source_mode(0) == 0) ui_toast("Back to local playback");
         return;
     }
+    saw_user_export = 0;
+    int exported = (g_source_mode == 0) && host_has_card;
+    if(!exported){ armed = 1; return; }   /* unplugged / back to local: re-arm */
     if(!armed) return;                    /* already handled this connection */
     armed = 0;
 
@@ -1373,6 +1385,14 @@ int main(int argc, char **argv){
      * PxPIN (live level) @ +0x00. Vol-Up = GPB pin 13 (DT vol-up-key). Register map validated
      * on-device 2026-08-13 against released states: GPB(0x10010100)=0xF6EFE127 has bits 13/14/15
      * (vol-up/down/play) high, GPE(0x10010400) bit31 (power) high. Active-low: pressed => bit 0. */
+    /* ONLY on a real power-on. ui_restart_self() re-execs this binary to apply a theme
+     * or font (and as watchdog recovery), which re-enters main() and would re-run the
+     * hand-off below: with Default UI = Stock - i.e. the user normally boots stock and
+     * reached diskOS by holding Vol-Up - Vol-Up is obviously not held now, so changing
+     * the theme would silently launch the STOCK UI. The marker says "this is a restart,
+     * not a boot"; it lives in argv rather than a flag file so it cannot be left stale. */
+    int is_ui_restart = (argc > 1 && !strcmp(argv[1], "--ui-restart"));
+    if(!is_ui_restart)
     {
         int flag_stock = (access("/usr/data/boot_default_stock", F_OK) == 0);
         int volup = 0, mem_ok = 0;

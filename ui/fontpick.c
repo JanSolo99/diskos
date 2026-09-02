@@ -40,6 +40,14 @@ static void pick_cb(lv_event_t *e)
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     const char *want = (i < 0) ? "Built-in" : g_names[i];
     if(!strcmp(want, theme_font_name())) { screen_back(); return; }   /* already active */
+    /* Copy to internal storage BEFORE persisting the choice: the card is mounted
+     * asynchronously and is not there at boot, so the card copy is not what will be
+     * loaded. If the copy fails, change nothing - a persisted choice that silently
+     * renders as the built-in face is worse than saying so. */
+    if(!theme_font_install(want)){
+        ui_toast("Couldn't load that font");
+        return;
+    }
     cfg_set_str("font_file", want);
     ui_toast("Applying font\xE2\x80\xA6");
     lv_timer_t *t = lv_timer_create(restart_now, 900, NULL);

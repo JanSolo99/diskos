@@ -73,11 +73,11 @@ static void ui_restart_soon(const char *why)
 
 static void apply_theme(int v){
     theme_set(v);
-    ui_restart_soon(v == THEME_LIGHT ? "Switching to Lightâ¦" : "Switching to Darkâ¦");
+    ui_restart_soon(v == THEME_LIGHT ? "Switching to Light\xE2\x80\xA6" : "Switching to Dark\xE2\x80\xA6");
 }
 static void apply_font_scale(int idx){
     cfg_set_int("font_scale", idx - 2);   /* cycler index 0..4 -> -2..+2 steps */
-    ui_restart_soon("Applying text sizeâ¦");
+    ui_restart_soon("Applying text size\xE2\x80\xA6");
 }
 static void apply_font_face(int v){ (void)v; fontpick_open(); }
 

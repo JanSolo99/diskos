@@ -492,24 +492,25 @@ int mdb_artist_albums(const char *artist, char names[][MDB_STR], int *counts, in
     qsort(tmp, (size_t)m, sizeof(char*), mdb_pstr_cmp);
     int n = 0;
     for(int i=0;i<m;i++){
-        if(n>0 && !strcasecmp(tmp[i], names[n-1])) counts[n-1]++;
-        else { if(n>=cap) break;
-               snprintf(names[n], MDB_STR, "%s", tmp[i]); counts[n] = 1; n++; }
+        if(n>0 && !strcasecmp(tmp[i], names[n-1])) continue;   /* same album again */
+        if(n>=cap) break;
+        snprintf(names[n], MDB_STR, "%s", tmp[i]); counts[n] = 0; n++;
     }
     free(tmp);
-    return n;
-}
 
-/* This artist's tracks from ONE album, in the album's own order (the order they
- * appear in the loaded library, which is the player's SONG order). */
-int mdb_artist_album_songs(const char *artist, const char *album, const mdb_song_t **out, int cap){
-    if(!artist || !album) return 0;
-    int n = 0;
-    for(int i=0;i<g_n && n<cap;i++){
-        if(strcasecmp(g_songs[i].album, album) != 0) continue;
-        char toks[8][MDB_STR];
-        int t = mdb_split_artists(g_songs[i].artist, toks, 8);
-        for(int k=0;k<t;k++) if(!strcasecmp(toks[k], artist)){ out[n++] = &g_songs[i]; break; }
+    /* Count the FULL album, not just this artist's share of it: opening one of these
+     * rows shows the whole album (that is what an album is, and the only scope the
+     * player can queue), so the number beside it has to describe the same thing. One
+     * pass over the library with a binary search into the sorted album list. */
+    for(int i=0;i<g_n;i++){
+        if(!g_songs[i].album[0]) continue;
+        int lo = 0, hi = n - 1;
+        while(lo <= hi){
+            int mid = lo + (hi - lo) / 2;
+            int c = strcasecmp(g_songs[i].album, names[mid]);
+            if(c == 0){ counts[mid]++; break; }
+            if(c < 0) hi = mid - 1; else lo = mid + 1;
+        }
     }
     return n;
 }

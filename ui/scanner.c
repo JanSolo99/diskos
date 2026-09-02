@@ -432,7 +432,10 @@ static void mp4_read(FILE *f, char *title,char *artist,char *album,char *genre)
  * valuesize(4) + flags(4) + key(NUL-terminated ASCII) + value(UTF-8). */
 static void apev2_read(FILE *f, char *title,char *artist,char *album,char *genre)
 {
-    unsigned char foot[32];
+    /* Zeroed: if BOTH probes fail (a file shorter than the footer, or a read error)
+     * nothing is ever written here, and the match below would read uninitialised
+     * stack - undefined behaviour, and reachable from any truncated file on the card. */
+    unsigned char foot[32] = {0};
     long tail = 0;
     for(int attempt = 0; attempt < 2; attempt++){
         tail = attempt ? -160 : -32;             /* plain footer, then footer-before-ID3v1 */

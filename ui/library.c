@@ -534,9 +534,12 @@ static void library_reload(void){
     (void)dur;
     if(g_view==VIEW_SONGS || g_view==VIEW_GROUP){
         int n;
-        if(g_view==VIEW_GROUP) n=(g_drill_kind==1)?mdb_album_songs(g_drill,g_buf,g_alloc_n)
+        /* kind 4 (an album reached via its artist) loads the same set as kind 1: the
+         * WHOLE album. Showing only the artist's tracks while Play All queued the
+         * album - the only scope the player understands - meant the list and the
+         * buttons under it disagreed about what "all" meant. */
+        if(g_view==VIEW_GROUP) n=(g_drill_kind==1 || g_drill_kind==4)?mdb_album_songs(g_drill,g_buf,g_alloc_n)
                                  :(g_drill_kind==3)?mdb_genre_songs(g_drill,g_buf,g_alloc_n)
-                                 :(g_drill_kind==4)?mdb_artist_album_songs(g_artist,g_drill,g_buf,g_alloc_n)
                                  :mdb_artist_songs(g_drill,g_buf,g_alloc_n);
         else { n=mdb_song_count(); if(n>g_alloc_n) n=g_alloc_n; for(int i=0;i<n;i++) g_buf[i]=mdb_song(i); }
         if(n<=0){ empty_scan("No songs found"); return; }
