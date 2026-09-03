@@ -92,6 +92,64 @@ def _maskrom_count_lsusb():
     return sum(1 for ln in out.splitlines() if "a108:eaef" in ln.lower())
 
 
+def _usb_list_pyusb():
+    """[(vid, pid, label)] for every attached USB device, or None if pyusb is unusable."""
+    try:
+        import usb.core
+    except Exception:
+        return None
+    try:
+        backend = _bundled_libusb_backend()
+        out = []
+        for d in usb.core.find(find_all=True, backend=backend):
+            label = ""
+            # Reading string descriptors needs the device to be open-able; on a machine
+            # without the udev rule that fails for most devices. It is only cosmetic, so
+            # never let it break enumeration.
+            try:
+                parts = [p for p in (d.manufacturer, d.product) if p]
+                label = " ".join(parts).strip()
+            except Exception:
+                pass
+            out.append((int(d.idVendor), int(d.idProduct), label))
+        return out
+    except Exception:
+        return None
+
+
+def _usb_list_lsusb():
+    """Fallback for Linux hosts with no usable pyusb backend."""
+    import re
+    import shutil
+    import subprocess
+    if not shutil.which("lsusb"):
+        return None
+    try:
+        out = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return None
+    devs = []
+    for ln in out.splitlines():
+        m = re.search(r"ID\s+([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\s*(.*)", ln)
+        if m:
+            devs.append((int(m.group(1), 16), int(m.group(2), 16), m.group(3).strip()))
+    return devs
+
+
+def usb_list():
+    """Every attached USB device as [(vid, pid, label)], or None if we cannot enumerate.
+
+    Used to detect the Disc in its NORMAL (running) mode. Only the mask-ROM identity
+    a108:eaef is known for certain; the running device presents a different one that
+    this project has never recorded, so the manager learns it from the user's own
+    device by diffing this list across a plug-in. None (cannot enumerate) is
+    deliberately distinct from [] (nothing attached)."""
+    devs = _usb_list_pyusb()
+    if devs is not None:
+        return devs
+    return _usb_list_lsusb()
+
+
 def maskrom_count():
     """How many devices are currently in mask-ROM mode. Prefers pyusb, falls back
     to lsusb, returns -1 if neither is available (caller should warn)."""

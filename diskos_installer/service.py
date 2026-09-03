@@ -106,6 +106,48 @@ def do_install(params, rep, confirm):
     return {"ok": True, "debug": d}
 
 
+def do_backup(params, rep, confirm=None):
+    """params: dict(firmware=?, stock=?). Extract the user's bone-stock rootfs and save it
+    as the restore point - and NOTHING else. No image is built and the device is never
+    touched, so this is safe to run at any time, with or without a Disc plugged in.
+
+    Until now the only way to get a restore point saved was to run a full install: the
+    save happened as a side effect of `do_install`, part-way through a 60-90 minute flash.
+    That is backwards for a backup - you want the copy that lets you go back BEFORE you
+    change anything, and you want to be able to verify and export it.
+
+    Returns a result dict with the recorded stock version and digest."""
+    work = state.build_dir()
+    stock_sq = os.path.join(work, "stock_rootfs.squashfs")
+    if params.get("stock"):
+        imagebuild._copyfile(params["stock"], stock_sq)
+    elif params.get("firmware"):
+        imagebuild.extract_stock_rootfs(params["firmware"], stock_sq, work, rep=rep)
+    else:
+        raise imagebuild.BuildError("need a firmware .zip or a stock rootfs.squashfs.", code="E140",
+                                   action="pass your official FiiO firmware .zip")
+
+    # Validate BEFORE it overwrites any existing recovery copy, exactly as do_install does:
+    # a wrong-device or corrupt rootfs must never be able to destroy a good restore point.
+    version = imagebuild.validate_stock_rootfs(stock_sq, rep)
+    digest = _save_stock(stock_sq, rep)
+
+    # Record provenance so "what can I restore to?" has a real answer later. Written softly:
+    # the image itself is saved and verified above, and a bookkeeping failure must not be
+    # reported as a failed backup.
+    st = state.load()
+    src = params.get("firmware") or params.get("stock") or ""
+    st.update({
+        "stock_version": version,
+        "stock_sha256": digest,
+        "stock_source": os.path.basename(src),
+        "stock_saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+    _save_state_soft(st, rep)
+    rep.ok(f"restore point saved (stock {version}).")
+    return {"ok": True, "version": version, "sha256": digest}
+
+
 def do_restore(params, rep, confirm):
     """Reflash the saved stock-rootfs image (deactivates diskOS; leaves /usr/data files). If no image
     is saved, a firmware .zip must be provided to rebuild it."""

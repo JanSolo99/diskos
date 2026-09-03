@@ -116,6 +116,41 @@ After setup, run commands through `./diskos-installer`; it selects the local env
 > scripts in [For developers](#for-developers). A prepared release bundle places them under
 > `vendor/<os>-<arch>/`.
 
+### Manager (detect, back up, install, revert)
+
+`./diskos-manager` opens a menu covering the whole lifecycle — see what the Disc is
+doing, keep a restore point, install diskOS, go back to stock. It is the same program as
+`diskos-installer` (a copy of the release binary named `diskos-manager` opens the menu
+too), and every destructive step runs the same code the installer does.
+
+```sh
+./diskos-manager                            # interactive menu
+./diskos-manager status                     # device, restore point, what's installed
+./diskos-manager detect --learn             # teach it to recognise your Disc when running
+./diskos-manager detect --watch             # wait for mask-ROM mode while you hold Vol-Down
+./diskos-manager backup --firmware fw.zip   # save a restore point (does NOT touch the device)
+./diskos-manager backup --verify            # re-hash it
+./diskos-manager backup --export ~/backups  # copy it somewhere durable, and verify the copy
+```
+
+**Back up before you flash.** `backup` reads your official FiiO firmware zip and saves the
+stock rootfs from it as a restore point, without going near the device — so you can make
+one, check it, and put a copy on another disk *before* anything changes. `restore-stock`
+reflashes exactly that image.
+
+Two honest limits, both reported by `status` rather than left to be discovered:
+
+- The restore point is your **stock firmware**, not a bit-for-bit dump of the device's
+  NAND. (`usbboot` does have a `--dump-partition` path, but nothing in this project has
+  ever exercised it on a Disc, so it is not offered as a backup.)
+- Files you keep on the player under `/usr/data` — playlists, favourites, settings — are
+  not part of it. Flashing the rootfs leaves that partition alone, but a restore point
+  will not bring it back if it is lost some other way.
+
+Only the mask-ROM USB identity (`a108:eaef`) is known for certain; the running device
+presents a different one that this project has never recorded, so `detect --learn` learns
+it from your own device by watching what appears when you plug it in.
+
 ### Graphical installer
 
 1. Run `./diskos-installer gui`.

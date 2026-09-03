@@ -11,60 +11,14 @@ proven native binaries. Nothing is installed system-wide on Linux/macOS.
 """
 
 import argparse
-import fcntl
 import os
 import sys
 import tempfile
 
 from diskos_installer import (__version__, bundle, errors, flasher, imagebuild,
-                              platform_probe, service, state, ui)
+                              manager, platform_probe, service, state, ui)
 from diskos_installer.reporter import CLIReporter
-
-
-# --- single-run lock so two installers can't touch the ONE physical device at once. It must be
-# SHARED across all users on the host (a GUI as your user and a CLI under sudo must not both flash),
-# so it lives at a FIXED /tmp path - NOT per-user. Advisory flock (auto-released on death -> no
-# stale-lock hazard). Opened READ-ONLY so any user can take the flock on a 0644 file, and O_NOFOLLOW
-# so a planted symlink can't redirect the open (we bail instead of following it). ---
-class _Lock:
-    def __init__(self):
-        # A FIXED absolute path, not tempfile.gettempdir(): $TMPDIR differs between a normal run and a
-        # sudo run (and per-user on macOS), which would hand them SEPARATE locks and defeat the whole
-        # point. /tmp is world-accessible on every supported host (Linux/macOS); Windows is unsupported.
-        self.path = "/tmp/diskos-installer.lock"
-        self.fd = None
-
-    def __enter__(self):
-        import stat as _stat
-        flags = os.O_CREAT | os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
-        try:
-            self.fd = os.open(self.path, flags, 0o644)
-        except OSError as e:
-            raise SystemExit(ui.red(
-                f"could not open the run-lock at {self.path} ({e}). If it exists as a symlink, "
-                "remove it and retry."))
-        # A planted symlink is refused by O_NOFOLLOW above; also refuse a non-regular file.
-        if not _stat.S_ISREG(os.fstat(self.fd).st_mode):
-            os.close(self.fd); self.fd = None
-            raise SystemExit(ui.red(f"run-lock {self.path} is not a regular file - refusing."))
-        try:
-            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            os.close(self.fd)
-            self.fd = None
-            raise SystemExit(ui.red(
-                "another diskOS installer is already running. Close it and retry "
-                "(only one may touch the device at a time)."))
-        return self
-
-    def __exit__(self, *exc):
-        try:
-            if self.fd is not None:
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
-                os.close(self.fd)
-        except OSError:
-            pass
-        return False
+from diskos_installer.runlock import RunLock
 
 
 def _set_phase(st, phase):
@@ -189,6 +143,29 @@ def build_parser():
     r.add_argument("-y", "--yes", action="store_true", help="don't prompt before flashing")
     r.set_defaults(func=cmd_restore_stock)
 
+    # ---- manager: device + restore-point front end (diskos_installer/manager.py) ----
+    sub.add_parser("manager", help="interactive menu: device, backup, install, restore")
+
+    stt = sub.add_parser("status", help="device, restore point, and what is installed")
+    stt.set_defaults(func=manager.cmd_status)
+
+    det = sub.add_parser("detect", help="is the Disc connected, and in which mode?")
+    det.add_argument("--learn", action="store_true",
+                     help="learn this Disc's running-mode USB id by watching it plug in")
+    det.add_argument("--watch", type=int, nargs="?", const=180, metavar="SECS",
+                     help="wait (default 180s) for the device to enter mask-ROM mode")
+    det.add_argument("-v", "--verbose", action="store_true", help="list every attached USB device")
+    det.set_defaults(func=manager.cmd_detect)
+
+    bk = sub.add_parser("backup", help="save/verify/export a stock restore point (never touches the device)")
+    bk.add_argument("--firmware", help="FiiO official update .zip to take the stock rootfs from")
+    bk.add_argument("--stock", help="pre-extracted stock rootfs.squashfs instead of a zip")
+    bk.add_argument("--verify", action="store_true", help="re-hash the saved restore point")
+    bk.add_argument("--export", metavar="DIR", help="copy the restore point to DIR and verify the copy")
+    bk.add_argument("--import", dest="import_from", metavar="DIR",
+                    help="adopt a previously exported restore point")
+    bk.set_defaults(func=manager.cmd_backup)
+
     rm = sub.add_parser("remove", help="delete the installer and everything it created")
     rm.add_argument("-y", "--yes", action="store_true", help="don't prompt")
     rm.add_argument("--force", action="store_true", help="remove even if diskOS is still on the device")
@@ -196,17 +173,46 @@ def build_parser():
     return p
 
 
+def _invoked_as_manager():
+    """Was this started under the name 'diskos-manager'?
+
+    One binary, two front doors. The frozen release is a single file, and adding a
+    second PyInstaller target for what is the same program with a different default
+    screen would double the build and the download for nothing. Dispatching on the
+    program name instead means a copy (or a symlink) named diskos-manager opens the
+    manager menu, and the same file named diskos-installer keeps opening the GUI -
+    no build change, and no way for the two to drift apart."""
+    name = os.path.basename(sys.argv[0] or "")
+    if getattr(sys, "frozen", False):
+        name = os.path.basename(sys.executable or name)
+    return name.startswith("diskos-manager")
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    # no subcommand, or 'gui' -> launch the graphical installer (under the lock)
+    # No subcommand: the manager menu when invoked as diskos-manager, else the GUI.
+    if getattr(args, "cmd", None) is None and _invoked_as_manager():
+        try:
+            return manager.menu(args)
+        except KeyboardInterrupt:
+            ui.err("interrupted.")
+            return 130
     if getattr(args, "cmd", None) in (None, "gui"):
         from diskos_installer import gui
-        with _Lock():
+        with RunLock():
             return gui.main()
+    if args.cmd == "manager":
+        try:
+            return manager.menu(args)
+        except KeyboardInterrupt:
+            ui.err("interrupted.")
+            return 130
     try:
-        if args.cmd == "doctor":            # doctor is read-only; no lock needed
+        # Read-only commands take no lock: they must stay usable while a flash runs
+        # in another window (checking on it is the obvious thing to want).
+        if args.cmd in ("doctor", "status", "detect"):
             return args.func(args)
-        with _Lock():
+        with RunLock():
             return args.func(args)
     except errors.DiskOSError as e:   # any coded installer error (Build/Flash/Preflight)
         ui.err(str(e))

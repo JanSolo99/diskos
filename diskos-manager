@@ -1,0 +1,29 @@
+#!/bin/sh
+# diskOS manager. Same program as ./diskos-installer, opened on the manager menu:
+# device detection, restore points, install and revert in one place.
+#
+# With no arguments it opens the interactive menu. Any argument is passed straight
+# through as a subcommand, e.g.  ./diskos-manager status
+#                                ./diskos-manager backup --firmware fw.zip
+#                                ./diskos-manager detect --watch
+set -eu
+HERE=$(CDPATH= cd "$(dirname "$0")" && pwd)
+
+if   [ -x "$HERE/.venv/bin/python" ];         then PY="$HERE/.venv/bin/python"
+elif [ -x "$HERE/.venv/Scripts/python.exe" ]; then PY="$HERE/.venv/Scripts/python.exe"
+elif command -v python3 >/dev/null 2>&1;      then PY=$(command -v python3)
+elif command -v python  >/dev/null 2>&1;      then PY=$(command -v python)
+else
+    echo "diskos-manager: no Python 3 found. Run ./install.sh first." >&2
+    exit 1
+fi
+
+PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+
+# No arguments -> the menu. With arguments, pass them through unchanged so every
+# installer subcommand stays reachable from this name too.
+if [ "$#" -eq 0 ]; then
+    exec "$PY" -m diskos_installer manager
+fi
+exec "$PY" -m diskos_installer "$@"
