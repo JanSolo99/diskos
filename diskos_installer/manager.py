@@ -32,7 +32,7 @@ import os
 import shutil
 import time
 
-from diskos_installer import (__version__, bundle, imagebuild, platform_probe,
+from diskos_installer import (__version__, bundle, diag, imagebuild, platform_probe,
                               service, state, ui)
 from diskos_installer.reporter import CLIReporter
 from diskos_installer.runlock import RunLock
@@ -153,7 +153,7 @@ def verify_restore_point(rep=None):
     `have_stock_image()` already compares the two, but it does so silently as a
     precondition. A backup you cannot ask "are you still good?" is not one you can
     rely on, so this reports what it found."""
-    rep = rep or CLIReporter()
+    rep = rep or diag.TeeReporter(CLIReporter())
     bin_path, sha_path = state.stock_paths()
     if not os.path.exists(bin_path):
         ui.err("no restore point saved.")
@@ -220,7 +220,7 @@ def export_restore_point(dest_dir):
 
 def import_restore_point(src_dir, rep=None):
     """Adopt a previously exported restore point as the active one."""
-    rep = rep or CLIReporter()
+    rep = rep or diag.TeeReporter(CLIReporter())
     src_bin = os.path.join(src_dir, "stock.bin")
     if not os.path.exists(src_bin):
         # Also accept being pointed straight at the .bin.
@@ -290,9 +290,11 @@ def cmd_status(args):
         ui.info("diskOS        : no install recorded by this tool")
 
     ui.info(f"state dir     : {state.state_dir()}")
+    ui.info(f"run log       : {diag.log_path()}")
     ui.info(ui.dim("note: the restore point is your STOCK FIRMWARE, not a dump of the device's"))
     ui.info(ui.dim("      NAND. Files you keep on the player (/usr/data) are not part of it."))
-    ui.info(ui.dim("run 'diskos-installer doctor' for the bundled-tool check."))
+    ui.info(ui.dim("run 'diskos-installer doctor' for the bundled-tool check, or"))
+    ui.info(ui.dim("'diskos-manager report' to collect everything into one file to send us."))
     return 0
 
 
@@ -452,7 +454,8 @@ def cmd_backup(args):
     ui.info("Reads your firmware zip and saves the stock rootfs it contains.")
     ui.info("The device is not touched, and nothing is flashed.")
     with RunLock():
-        r = service.do_backup({"firmware": args.firmware, "stock": args.stock}, CLIReporter())
+        r = service.do_backup({"firmware": args.firmware, "stock": args.stock},
+                              diag.TeeReporter(CLIReporter()))
     if not r.get("ok"):
         return 1
     ui.info("Keep a copy somewhere other than this machine:")
@@ -471,6 +474,7 @@ _MENU = [
     ("Export my restore point to a folder", "export"),
     ("Install diskOS", "install"),
     ("Restore stock firmware", "restore"),
+    ("Write a diagnostic report (for bug reports)", "report"),
     ("Quit", "quit"),
 ]
 
@@ -540,11 +544,26 @@ def menu(args=None):
                 _menu_install()
             elif key == "restore":
                 _menu_restore()
+            elif key == "report":
+                path = diag.write_report()
+                if path:
+                    ui.ok(f"written: {path}")
+                    ui.info("Attach it to a GitHub issue - home paths and your username")
+                    ui.info("are redacted, but read it first.")
         except KeyboardInterrupt:
             print()
             ui.info("cancelled.")
-        except Exception as e:            # a menu must never exit on one bad action
-            ui.err(str(e))
+        except Exception as e:            # noqa: BLE001 - a menu must never exit on one
+            # bad action. But it must not swallow the evidence either: printing only
+            # str(e) discarded the traceback in the front end a non-technical user is
+            # most likely to be using when something breaks.
+            tb = diag.log_exception(e, context="menu action")
+            ui.err(str(e) or repr(e))
+            if diag.debug_enabled():
+                print(tb)
+            else:
+                ui.info(ui.dim(f"recorded in {diag.log_path()}"))
+            ui.info(ui.dim("option 9 writes a report you can attach to an issue"))
 
 
 class _Args:
@@ -583,7 +602,7 @@ def _menu_install():
     with RunLock():
         service.do_install({"firmware": os.path.expanduser(fw), "stock": None,
                             "ui_binary": None, "variant": variant},
-                           CLIReporter(), _menu_confirm)
+                           diag.TeeReporter(CLIReporter()), _menu_confirm)
 
 
 def _menu_restore():
@@ -592,4 +611,4 @@ def _menu_restore():
         ui.info("If you have an exported one:  diskos-manager backup --import <folder>")
         return
     with RunLock():
-        service.do_restore({"firmware": None}, CLIReporter(), _menu_confirm)
+        service.do_restore({"firmware": None}, diag.TeeReporter(CLIReporter()), _menu_confirm)

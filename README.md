@@ -151,6 +151,34 @@ Only the mask-ROM USB identity (`a108:eaef`) is known for certain; the running d
 presents a different one that this project has never recorded, so `detect --learn` learns
 it from your own device by watching what appears when you plug it in.
 
+### When something goes wrong
+
+Every run is logged, always — not only when a flag is passed, because a fault you can
+only capture by asking someone to reproduce it is a fault you hear about twice. The
+transcript goes to `<state dir>/logs/diskos.log` (rotated, so it cannot grow forever),
+and `status` prints the exact path.
+
+```sh
+./diskos-manager report                 # one file with everything, to attach to an issue
+./diskos-manager report -o ~/Desktop    # ...written somewhere specific
+./diskos-manager --debug <command>      # tracebacks and log lines on the console too
+```
+
+`report` collects the host and Python build, which bundled tools were found, every
+attached USB device (flagging mask-ROM and your learned Disc), the things that most
+often make a plugged-in device invisible — missing libusb, no udev rule, a `noexec`
+temp mount, running as root — free disk space, the saved state and restore point, and
+the tail of the run and flash logs.
+
+Paths under your home directory are collapsed to `~` and your username is removed
+*where it appears in a path*. It is deliberately not stripped from ordinary prose: on a
+root account that turned `running as root: True` — the most useful line in the file —
+into `running as <user>: True`, redacting a diagnostic rather than a secret. The report
+is plain text; read it before posting it anywhere public.
+
+Errors carry stable codes (`E1xx` preflight, `E2xx` build, `E3xx` flash, `F1xx` the
+device writer's own verdict) — quote the code and attach the report.
+
 ### Graphical installer
 
 1. Run `./diskos-installer gui`.

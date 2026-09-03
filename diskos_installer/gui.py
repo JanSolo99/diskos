@@ -16,6 +16,7 @@ import threading
 import time
 
 from diskos_installer import __version__, bundle, platform_probe, service, state
+from diskos_installer import diag
 from diskos_installer.reporter import QueueReporter
 
 ACCENT = "#FF375F"      # diskOS accent
@@ -35,7 +36,10 @@ class App:
     def __init__(self, root):
         self.root = root
         self.q = queue.Queue()
-        self.reporter = QueueReporter(self.q)
+        # Tee'd to the run log as well: a GUI user is the LEAST likely to have a
+        # terminal open when something fails, so the on-disk transcript matters more
+        # here than anywhere else. The queue still drives the window exactly as before.
+        self.reporter = diag.TeeReporter(QueueReporter(self.q))
         self.worker = None
         self.state = IDLE
         self.flashing = False              # True only during the destructive phase

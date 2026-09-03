@@ -15,7 +15,7 @@ import os
 import sys
 import tempfile
 
-from diskos_installer import (__version__, bundle, errors, flasher, imagebuild,
+from diskos_installer import (__version__, bundle, diag, errors, flasher, imagebuild,
                               manager, platform_probe, service, state, ui)
 from diskos_installer.reporter import CLIReporter
 from diskos_installer.runlock import RunLock
@@ -84,7 +84,7 @@ def cmd_install(args):
         return 2
     params = {"firmware": args.firmware, "stock": args.stock,
               "ui_binary": args.ui, "variant": args.variant}
-    r = service.do_install(params, CLIReporter(), _cli_confirm(args.yes))
+    r = service.do_install(params, diag.TeeReporter(CLIReporter()), _cli_confirm(args.yes))
     if r.get("ok"):
         ui.info("The UI is embedded in the flashed image - just reboot the device and it installs")
         ui.info("diskOS automatically on first boot (no microSD step needed).")
@@ -94,7 +94,8 @@ def cmd_install(args):
 
 
 def cmd_restore_stock(args):
-    r = service.do_restore({"firmware": args.firmware}, CLIReporter(), _cli_confirm(args.yes))
+    r = service.do_restore({"firmware": args.firmware},
+                          diag.TeeReporter(CLIReporter()), _cli_confirm(args.yes))
     return 0 if r.get("ok") else (3 if r.get("aborted") else 1)
 
 
@@ -102,7 +103,7 @@ def cmd_remove(args):
     def confirm(summary):
         ui.warn(summary.get("consequence", ""))
         return args.yes or ui.confirm("Delete the installer's files anyway?", default=False)
-    r = service.do_remove({"force": args.force}, CLIReporter(), confirm)
+    r = service.do_remove({"force": args.force}, diag.TeeReporter(CLIReporter()), confirm)
     if r.get("ok"):
         if getattr(sys, "frozen", False):
             ui.info(f"To finish: delete this executable ({sys.executable}).")
@@ -120,6 +121,9 @@ def build_parser():
     p = argparse.ArgumentParser(prog="diskos-installer",
                                 description="Standalone diskOS installer for the FiiO Snowsky Disc.")
     p.add_argument("--version", action="version", version=f"diskos-installer {__version__}")
+    # Global. Every run is logged either way; this decides what reaches the console.
+    p.add_argument("--debug", action="store_true",
+                   help="show tracebacks and log lines on the console (also DISKOS_DEBUG=1)")
     # no subcommand -> GUI (running ./diskos-installer with no arguments); subcommands = CLI
     sub = p.add_subparsers(dest="cmd", required=False)
 
@@ -166,6 +170,11 @@ def build_parser():
                     help="adopt a previously exported restore point")
     bk.set_defaults(func=manager.cmd_backup)
 
+    rep = sub.add_parser("report", help="write a diagnostic report to attach to a bug report")
+    rep.add_argument("-o", "--output", metavar="PATH", help="file or folder to write it to")
+    rep.add_argument("--show", action="store_true", help="also print it to the terminal")
+    rep.set_defaults(func=diag.cmd_report)
+
     rm = sub.add_parser("remove", help="delete the installer and everything it created")
     rm.add_argument("-y", "--yes", action="store_true", help="don't prompt")
     rm.add_argument("--force", action="store_true", help="remove even if diskOS is still on the device")
@@ -188,38 +197,61 @@ def _invoked_as_manager():
     return name.startswith("diskos-manager")
 
 
-def main(argv=None):
-    args = build_parser().parse_args(argv)
+def _run(args):
+    """Dispatch one parsed invocation. Wrapped by main() for logging."""
     # No subcommand: the manager menu when invoked as diskos-manager, else the GUI.
     if getattr(args, "cmd", None) is None and _invoked_as_manager():
-        try:
-            return manager.menu(args)
-        except KeyboardInterrupt:
-            ui.err("interrupted.")
-            return 130
+        return manager.menu(args)
     if getattr(args, "cmd", None) in (None, "gui"):
         from diskos_installer import gui
         with RunLock():
             return gui.main()
     if args.cmd == "manager":
-        try:
-            return manager.menu(args)
-        except KeyboardInterrupt:
-            ui.err("interrupted.")
-            return 130
+        return manager.menu(args)
+    # Read-only commands take no lock: they must stay usable while a flash runs in
+    # another window (checking on it is the obvious thing to want), and `report` in
+    # particular has to work WHILE something is stuck.
+    if args.cmd in ("doctor", "status", "detect", "report"):
+        return args.func(args)
+    with RunLock():
+        return args.func(args)
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    diag.set_debug(getattr(args, "debug", False))
+    diag.session_start(sys.argv)
+    rc = 1
     try:
-        # Read-only commands take no lock: they must stay usable while a flash runs
-        # in another window (checking on it is the obvious thing to want).
-        if args.cmd in ("doctor", "status", "detect"):
-            return args.func(args)
-        with RunLock():
-            return args.func(args)
+        rc = _run(args)
     except errors.DiskOSError as e:   # any coded installer error (Build/Flash/Preflight)
+        # Coded errors are expected failures with a plain-language action attached, so
+        # the console gets the message - but the traceback still goes to the log, since
+        # "which of the four call sites raised E220" is the first thing we will ask.
+        tb = diag.log_exception(e, context=f"cmd={getattr(args, 'cmd', None)}")
         ui.err(str(e))
-        return 1
+        if diag.debug_enabled():
+            print(tb, file=sys.stderr)
+        else:
+            ui.info(ui.dim(f"details in {diag.log_path()}  (--debug to see them here)"))
+        rc = 1
     except KeyboardInterrupt:
+        diag.log("interrupted by user", level="warn")
         ui.err("interrupted.")
-        return 130
+        rc = 130
+    except Exception as e:            # noqa: BLE001 - an unexpected fault is exactly
+        # what we most need recorded. Never let it escape as a bare traceback the user
+        # has to copy by hand out of a terminal they are about to close.
+        tb = diag.log_exception(e, context=f"cmd={getattr(args, 'cmd', None)} UNEXPECTED")
+        ui.err(f"unexpected error: {e}")
+        if diag.debug_enabled():
+            print(tb, file=sys.stderr)
+        ui.info(f"This is a bug. The full traceback is in {diag.log_path()}")
+        ui.info("Please run 'diskos-installer report' and attach the file to an issue.")
+        rc = 1
+    finally:
+        diag.session_end(rc)
+    return rc
 
 
 if __name__ == "__main__":
