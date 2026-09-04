@@ -29,6 +29,7 @@ Built with **LVGL 9.2.2** (software renderer) on a static-musl mipsel toolchain.
 | Now Playing + art | `ui.c` / `ui.h`, `art.c` / `art.h`, `artcache.c`, `saver.c`, `songinfo.c`, `npmenus.c` |
 | Library / browse | `home.c`, `library.c`, `musicdb.c`, `search.c`, `playlistview.c`, `scanner.c`, `scanview.c` |
 | Settings / features | `settings.c`, `sysconfig.c` (stock SYSCONFIG access), `eqcustom.c`, `quicksettings.c`, `modes.c`, `kbinput.c`, `colorpick.c`, `toast.c`, `apps.c`, `debug_ui.c`, `fwcaps.c` |
+| Shared utility | `fileutil.c` / `fileutil.h` (atomic, durable file copy) |
 | Connectivity | `wifi.c`, `bt.c`, `weather.c`, `lyrics.c`, `lastfm.c` / `lastfm_ui.c` |
 | Bundled third-party | `sqlite3.c` (public domain), `jsmn.h` (MIT), `md5.c` (public domain), `font_*.c` (generated glyph data) |
 | Dev/diagnostic tools | `fbshot.c`, and other small on-device helpers (not part of the shipped UI) |
@@ -54,6 +55,23 @@ hard-coded value, so the whole interface can be re-skinned from one place.
 If you add a screen, paint it from the tokens. A hard-coded `lv_color_hex()` will look correct in
 whichever palette you developed against and wrong in the other.
 
+## Host tests
+
+Some behaviour can only be checked by running it, and needs no device - see [`tests/`](tests/):
+
+```sh
+make fontcheck && ./fontcheck    # the user-font path: LVGL's VFS, the icon fallback chain,
+                                 # per-size caching, and cold boot with the SD card absent
+```
+
+The scanner has an in-tree harness instead: build `scanner.c` with `-DSCANNER_TEST` and point
+`-DSCAN_ROOT` / `-DDB_PATH` at a scratch directory and database.
+
+A quick way to check the whole tree still compiles and links, without the cross toolchain, is to
+build it for the host: `make CROSS= CFLAGS="-O0 -std=gnu11 -pthread -D_GNU_SOURCE
+-DLV_CONF_INCLUDE_SIMPLE -I. -w" LDLIBS="-lm -lrt -lcrypt"`. The result will not run (it wants the
+Disc's framebuffer and `mq_player`), but it catches missing symbols and bad prototypes in seconds.
+
 ## Build
 Requires:
 - A static **mipsel-linux-musl** cross toolchain (e.g. from [musl.cc](https://musl.cc) or crosstool-NG).
@@ -76,6 +94,34 @@ make CROSS=/opt/x-tools/mipsel-linux-musl/bin/mipsel-linux-musl-  LVGL=/path/to/
 CROSS := /opt/x-tools/mipsel-linux-musl/bin/mipsel-linux-musl-
 LVGL  := /path/to/lvgl
 ```
+
+## Build in Docker (reproducible, recommended)
+
+If your host toolchain fights the build, use the pinned container - it locks the exact
+mipsel-linux-musl toolchain (by SHA-256) the binary is built with, so you don't have to source one:
+
+```sh
+docker build -t diskos-ui-builder .                                  # from this ui/ directory
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" diskos-ui-builder
+```
+
+The static `mq_ui` lands in the current directory. LVGL is vendored at `lvgl/`, so nothing else is
+needed. The `-u` flag keeps the build outputs owned by you, not root.
+
+The toolchain host binaries are 32-bit x86, so the image is `linux/amd64`. On Apple Silicon / ARM,
+Docker runs it under emulation automatically (slower, but it works).
+
+## Troubleshooting
+
+- **`musl` / SQLite `fcntl64` errors:** this is a **toolchain mismatch**, not a flag problem. The
+  bundled `sqlite3.c` compiles cleanly against the pinned musl mipsel GCC 11.2.x (verified with and
+  without `_GNU_SOURCE` / `_FILE_OFFSET_BITS=64`). If your cross-compiler errors on `fcntl64`, it's a
+  different/mixed toolchain - use the Docker builder above, which pins the working one. (Note the
+  Makefile compiles `sqlite3.c` with a **dedicated rule** that omits `_GNU_SOURCE`; keep that if you
+  build by hand.)
+- **`Makefile:NN: *** missing separator`:** a recipe line (the command under a rule) must start with a
+  real **Tab**, not spaces - an editor or a copy-paste turned the leading Tab into spaces. Re-indent
+  that line with a single Tab.
 
 ## Deploy / flash
 `mq_ui` is normally delivered by the diskOS **installer**, which bakes it into a rootfs image and

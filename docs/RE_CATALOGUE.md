@@ -175,7 +175,7 @@ Saved a stock "User 1" custom EQ (+12 @ 32 Hz, −12 @ 16 kHz) and read it back.
 
 mq_ui opens the **`/ui`** mqueue (name built @0x41b388, recv thread @0x415584,
 `mq_receive` wrapper @0x41b5c8). Each frame = `TAG(4) + %x extension + JSON "other"`
-(parser @0x415674: `strncpy …,4` then `sscanf %x`). Dispatch is a
+(parser @0x415674: `strncpy ...,4` then `sscanf %x`). Dispatch is a
 `strncmp(cmd,tag,4)` chain in `ui_ctrl_response` (@0x41bfd0-0x41c098). Recv log
 `[UI RECV]: %s` @0x272960. **(IPC path + format instruction-verified)**
 
@@ -215,7 +215,7 @@ Verified-present log strings: GET_VERSION_REPLY @0x27255c, GET_WIFI_CONNECT_STAT
 `song_sample_rate`, `song_encoding_rate`, `song_bit_rate`, `song_mimetype`,
 `song_file_path`, `is_sacd/is_cue/is_dsd`, `love` (favorite), `state` (play state),
 `playerflag` (@0x271c08), `curlistlength`, `pos_id`, `playing_num`,
-`work_mode` (@0x271b… 0x272b34), `battery` (@0x272c58). Album art → width/height/
+`work_mode` (@0x271b... 0x272b34), `battery` (@0x272c58). Album art → width/height/
 quality/rgb → `/usr/data/fiio/cover.png`.
 
 → For diskOS status indicators (battery/BT/wifi) we read tags a704/a706 (wifi/net),
@@ -266,7 +266,7 @@ PLAYLIST_INFO(ID) ON DELETE CASCADE`, `UNIQUE(PLAYLIST_ID,PATH,TRACK)`.
 
 ### PLAY_LIST (song.db) - queue registry: ID(PK) · LIST_ID · LIST_NAME.
 
-### LIST_SONG_0/1/2 (song.db) - active play queues, built by `INSERT INTO LIST_SONG_%d … SELECT … FROM SONG` (verified). Cols: ID · LIST_ID · POS_ID(=MUSIC_ID join key) · PATH · NAME · TITLE · ALBUM · ARTIST · GENRE · DISC · TRACK · IS_CUE · IS_ISO · OFFSET · DURATION · ADD_TIME · IS_SELECT · SONG_TYPE · ALBUM_ARTIST.
+### LIST_SONG_0/1/2 (song.db) - active play queues, built by `INSERT INTO LIST_SONG_%d ... SELECT ... FROM SONG` (verified). Cols: ID · LIST_ID · POS_ID(=MUSIC_ID join key) · PATH · NAME · TITLE · ALBUM · ARTIST · GENRE · DISC · TRACK · IS_CUE · IS_ISO · OFFSET · DURATION · ADD_TIME · IS_SELECT · SONG_TYPE · ALBUM_ARTIST.
 
 ### MEMORY_PLAY (song.db) - resume state, single row. ID(=1) · MUSIC_ID · IS_PLAYING · POSITION · IS_CUE · IS_ISO · TRACK. **(UPDATE verified @mq_player.str:13412)**
 
@@ -293,7 +293,7 @@ LOCK_THEME · TREBLE · BASS · WIFI_STATUS · BT_STATUS · LO_DISABLE · OS_MOD
 DSD_DECODE · SPDIF · AUTO_TIME · DRE_STATUS · LOCAL_IMG_ANIM · IMG_ANIM_BRIGHTNESS ·
 ARM_VERSION · MCU_OTA_FAILED_TIME · KEY_SINGLE/DOUBLE/LONG_CLICK_SLE(gesture→action) ·
 ARTIST_CLASS_TYPE · AUDIO_VOLUME_SET.
-Config is committed to flash on write (`now try to save config to flash` @0x25a…).
+Config is committed to flash on write (`now try to save config to flash` @0x25a...).
 
 ---
 
@@ -390,7 +390,7 @@ ARTIST_CLASS_TYPE=0, TREBLE=0, BASS=0, OUT_DEV=6, OS_MODE=0, LO_DISABLE=0, DSD_M
 INPUT_MODE=1, VOL_MODE=1. (No explicit GAIN column - likely VOL_MODE or encoded in OUT_DEV;
 confirm by toggling.) Filter enum (others.json 70-75): 0=FAST_LL,1=SLOW_LL,2=SLOW_PC,3=FAST_PC,
 4=NON_OS,5=Wideband_FF. To wire a setting in diskOS: write its SYSCONFIG column + send its apply
-command (verified: gapless 0647, BT codec 06b3 [0=SBC…4=LDAC-high], artist 0648, memory 0815, keys 0820-22; Gain/
+command (verified: gapless 0647, BT codec 06b3 [0=SBC...4=LDAC-high], artist 0648, memory 0815, keys 0820-22; Gain/
 Filter/DRE/Balance apply-cmds TBD via strace-correlate of stock mq_ui - strace on mq_ui is SAFE,
 only strace-on-mq_player triggers the MCU reboot).
 
@@ -407,7 +407,7 @@ Background-noise tags to ignore: 0807 (recurring 0/1 status), 0704 (wifi scan).
 - **SPDIF** = via output-route `0666` - SPDIF on = `0666000C0004`, analog = `0666000C0006`
   (0666 = OUT_DEV/output route: LOCAL_ANALOG=6, SPDIF=4; mutually exclusive with headphone).
 - **BT codec** = `06b3` (**CORRECTED**: mq_ui codec menu 0x464e90 sends 06b3, not 06b4):
-  codec-settings menu sends payload-less `06b3000C0000`=SBC `…0001`=AAC `…0002/3/4`=LDAC mob/std/high.
+  codec-settings menu sends payload-less `06b3000C0000`=SBC `...0001`=AAC `...0002/3/4`=LDAC mob/std/high.
   **But the ROUTE-to-speaker frame (live-captured 2026-08-03) is `06b3<len>000X<MAC>`** (X=codec, MAC payload
   kept for stock frame-shape; worker ignores it). diskOS route uses `06b3001D0000<MAC>` (SBC). `06b4` is
   LDAC-quality only. **Full working BT-transmit sequence → COMMAND_MAP.md "BT AUDIO OUTPUT" section.**

@@ -39,3 +39,7 @@ addresses, firmware zips, stock rootfs, or generated images.
 See [`agents/AGENTS.md`](agents/AGENTS.md) for a project brief (the hardware facts that are easy to
 get wrong, the repo layout, and the device-safety rules) - useful whether you work by hand or with
 an AI coding agent. Build the installer with `bash build/build.sh`.
+
+For iterating on the on-device UI, see [`docs/DEV_WORKFLOW.md`](docs/DEV_WORKFLOW.md) (build, deploy over
+SSH, hot-reload, and the watchdog trap to avoid) and the helper scripts in [`tools/`](tools/) for
+deploying a build, capturing screenshots, and driving the touchscreen.
