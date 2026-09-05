@@ -413,7 +413,8 @@ own verdict.
 
 ## Reference
 
-`docs/QUEUE_DESIGN.md` (the play queue: three routes and the probe that picks one),
+`docs/ROADMAP.md` (what is left before v1, in priority order),
+`docs/QUEUE_DESIGN.md` (the play queue: Route B, confirmed on hardware),
 `docs/RE_CATALOGUE.md` (what is decoded, what is not), `docs/COMMAND_MAP.md` (IPC tags),
 `docs/HARDWARE.md` (probed hardware + a gap table), `docs/DEV_WORKFLOW.md`, `ui/README.md`
 (theming and font contract).
