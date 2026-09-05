@@ -47,13 +47,13 @@ static void sleep_cb(lv_event_t *e){ (void)e; ui_request_sleep(); screen_show(SC
 static void wifi_short_cb(lv_event_t *e){ (void)e;
     int on = wifi_toggle();
     if(g_wifi_dot) lv_obj_set_style_bg_color(g_wifi_dot, (on ? lv_color_hex(QS_ON) : qs_off()), 0);
-    ui_toast(on ? "Turning on Wi-Fi\xE2\x80\xA6" : "Wi-Fi off");
+    ui_toast(on ? "Turning on Wi-Fi..." : "Wi-Fi off");
 }
 static void wifi_long_cb(lv_event_t *e){ (void)e; wifi_open(); }
 static void bt_short_cb(lv_event_t *e){ (void)e;
     int on = bt_toggle();
     if(g_bt_dot) lv_obj_set_style_bg_color(g_bt_dot, (on ? lv_color_hex(QS_ON) : qs_off()), 0);
-    ui_toast(on ? "Turning on Bluetooth\xE2\x80\xA6" : "Bluetooth off");
+    ui_toast(on ? "Turning on Bluetooth..." : "Bluetooth off");
 }
 static void bt_long_cb(lv_event_t *e){ (void)e; bt_open(); }
 

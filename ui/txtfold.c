@@ -53,6 +53,8 @@ static const char *fold_cp(uint32_t cp)
         case 0xBA:   return "o";     /* masculine ordinal */
         case 0xAB:   return "\"";    /* << */
         case 0xBB:   return "\"";    /* >> */
+        case 0xB0:   return "";      /* degree sign - wttr.in sends one and no font we
+                                      * load has it, so "20C" beats "20<box>C". */
         case 0xB4:   return "'";     /* acute accent used as an apostrophe */
         case 0x2018: case 0x2019:    /* ' ' - THE apostrophe bug */
         case 0x201A: case 0x201B:

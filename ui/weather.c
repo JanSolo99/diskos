@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "screens.h"
+#include "txtfold.h"
 #include "config.h"
 #include <stdio.h>
 #include <string.h>
@@ -98,6 +99,10 @@ static void *weather_thread(void *arg)
         memcpy(cond, c, cl); cond[cl] = 0;
         char *tp = temp; if (*tp == '+') tp++;   /* drop leading + on positive temps */
         snprintf(result, sizeof result, "%s  %s  %s", ic, tp, cond);   /* into local; g_wbuf write is under the lock */
+        /* wttr.in sends a real degree sign, and "feels like" conditions can carry
+         * accented words - none of which Montserrat can draw (see txtfold.h). The
+         * weather-icon glyphs are private-use and pass through untouched. */
+        txt_fold_ascii(result);
         fail = 0;
     }
     if (fail) fprintf(stderr, "weather: no usable data (resp='%.48s')\n", line);

@@ -173,10 +173,15 @@ static const char *song_group_src(const mdb_song_t *s, int axis){
     return s->album_artist[0] ? s->album_artist : s->artist;
 }
 
-/* Cut a trailing "feat. X" / "ft X" / "featuring X" / "f/ X" off an artist name.
- * Used ONLY on the ARTIST fallback: a file that carries an album artist is already
- * authoritative and is never rewritten. The separator has to FOLLOW A SPACE, so a
- * name that merely contains the letters (Daft Punk, Left Field) is left alone. */
+/* Cut a trailing "feat. X" / "ft X" / "featuring X" / "f/ X" off an artist name,
+ * including the bracketed forms - "50 Cent (feat. Eminem)" and "50 Cent [ft. Nate
+ * Dogg]" are how most taggers actually write it, and missing those was missing the
+ * common case.
+ *
+ * Used ONLY on the ARTIST fallback: a file that carries its own album artist is
+ * authoritative and is never rewritten. The separator has to FOLLOW A SPACE (with at
+ * most one opening bracket between), so a name that merely CONTAINS the letters -
+ * Daft Punk, Left Field, Fteam - is left alone. */
 static void strip_featuring(char *s){
     static const char *const SEP[] = { "feat.", "feat ", "featuring", "ft.", "ft ", "f/" };
     int seen = 0;                    /* only ever cut AFTER a real name: a malformed
@@ -185,8 +190,10 @@ static void strip_featuring(char *s){
     for(char *p = s; *p; p++){
         if(*p != ' '){ seen = 1; continue; }
         if(!seen) continue;
+        const char *q = p + 1;
+        if(*q == '(' || *q == '[') q++;          /* "Artist (feat. Guest)" */
         for(unsigned k = 0; k < sizeof SEP / sizeof SEP[0]; k++)
-            if(!strncasecmp(p+1, SEP[k], strlen(SEP[k]))){ *p = 0; return; }
+            if(!strncasecmp(q, SEP[k], strlen(SEP[k]))){ *p = 0; return; }
     }
 }
 

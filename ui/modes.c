@@ -49,15 +49,15 @@ static void row_cb(lv_event_t *e){
     /* Serialise: ignore taps while the previous switch is still applying (the player's gadget
      * state-machine is asynchronous). NB we do NOT early-return on "same mode" - re-issuing must
      * always be allowed so Local works as a recover even if our cached mode is stale. */
-    if(g_last_switch && lv_tick_elaps(g_last_switch) < 3000){ ui_toast("Switching\xE2\x80\xA6"); return; }
+    if(g_last_switch && lv_tick_elaps(g_last_switch) < 3000){ ui_toast("Switching..."); return; }
     g_last_switch = lv_tick_get();
     if(ui_set_source_mode(m) == 0){
         mark_selected();
         /* honest wording: the frames are queued; the async switch completes a moment later. */
         static const char *msg[N_MODES] = {
             "Switching to local playback", "Switching to USB DAC",
-            "Bluetooth receiving on \xE2\x80\x93 connect your phone",
-            "USB storage on \xE2\x80\x93 connect a computer" };
+            "Bluetooth receiving on - connect your phone",
+            "USB storage on - connect a computer" };
         ui_toast(msg[m]);
     } else {
         ui_toast("Couldn't switch mode");
@@ -136,7 +136,7 @@ static void usb_pick_cb(lv_event_t *e){
     usb_dlg_close();
     if(mode < 0) return;                     /* "Not now": leave the player as it is */
     if(ui_set_source_mode(mode) != 0){ ui_toast("Couldn't switch mode"); return; }
-    static const char *msg[4] = { "Charging \xE2\x80\x93 still playing", "USB DAC", NULL,
+    static const char *msg[4] = { "Charging - still playing", "USB DAC", NULL,
                                   "Card open on the computer" };
     if(mode >= 0 && mode < 4 && msg[mode]) ui_toast(msg[mode]);
 }

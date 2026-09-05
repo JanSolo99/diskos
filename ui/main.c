@@ -609,7 +609,7 @@ static void usb_connect_watch(lv_timer_t *t)
 
     switch(cfg_get_int("usb_connect", 0)){
         case 1:                                            /* Keep Playing */
-            if(ui_set_source_mode(0) == 0) ui_toast("Charging \xE2\x80\x93 still playing");
+            if(ui_set_source_mode(0) == 0) ui_toast("Charging - still playing");
             break;
         case 3:                                            /* USB DAC */
             if(ui_set_source_mode(1) == 0) ui_toast("USB DAC");
@@ -725,7 +725,7 @@ static void scanner_poll(lv_timer_t *t){
         char b[64];
         if(scanner_no_sd())  snprintf(b, sizeof b, "Insert an SD card to scan");    /* SD not mounted; library kept */
         else if(total>0)     snprintf(b, sizeof b, "Scanned %d song%s", total, total==1?"":"s");
-        else if(done>0)      snprintf(b, sizeof b, "Scan failed \xE2\x80\x94 library kept");   /* rolled back */
+        else if(done>0)      snprintf(b, sizeof b, "Scan failed - library kept");   /* rolled back */
         else                 snprintf(b, sizeof b, "No music found");
         ui_toast(b);
     }

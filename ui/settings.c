@@ -73,11 +73,11 @@ static void ui_restart_soon(const char *why)
 
 static void apply_theme(int v){
     theme_set(v);
-    ui_restart_soon(v == THEME_LIGHT ? "Switching to Light\xE2\x80\xA6" : "Switching to Dark\xE2\x80\xA6");
+    ui_restart_soon(v == THEME_LIGHT ? "Switching to Light..." : "Switching to Dark...");
 }
 static void apply_font_scale(int idx){
     cfg_set_int("font_scale", idx - 2);   /* cycler index 0..4 -> -2..+2 steps */
-    ui_restart_soon("Applying text size\xE2\x80\xA6");
+    ui_restart_soon("Applying text size...");
 }
 static void apply_font_face(int v){ (void)v; fontpick_open(); }
 
@@ -425,7 +425,7 @@ static void read_batt_temp(char *buf, int n){
     int t;
     if(f && fscanf(f, "%d", &t) == 1){ fclose(f);
         unsigned at = t<0 ? 0u-(unsigned)t : (unsigned)t;   /* unsigned negate: INT_MIN-safe; sign explicit */
-        snprintf(buf, n, "%s%u.%u\xC2\xB0""C", t<0?"-":"", at/10, at%10);   /* 305->"30.5°C", -5->"-0.5°C" */
+        snprintf(buf, n, "%s%u.%uC", t<0?"-":"", at/10, at%10);   /* 305->"30.5C", -5->"-0.5C" */
     } else { if(f) fclose(f); snprintf(buf, n, "--"); }
 }
 /* Format a slider value WITH its unit - shared by val_text (committed value) and the live drag

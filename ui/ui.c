@@ -52,7 +52,7 @@ static lv_obj_t *fsart, *fsart_img, *fsart_title, *fsart_artist;
 static int fsart_on;
 static lv_obj_t *title;
 static lv_obj_t *artist;
-static lv_obj_t *album;   /* also hosts the track position: "N / M" or "Album · N/M" */
+static lv_obj_t *album;   /* also hosts the track position: "N / M" or "Album - N/M" */
 static lv_obj_t *btn_pp;
 static lv_obj_t *btn_prev;
 static lv_obj_t *btn_next;
@@ -1574,13 +1574,13 @@ void ui_update(const track_state_t *st)
         if(strcmp(fsart_path, st->path) != 0){ copy_cstr(fsart_path, sizeof fsart_path, st->path); fsart_reload_img(); }
     }
     /* Album line also carries the track position. Never drop the album: append
-     * the position as "Album · N/M" whenever an album exists; show "N / M" alone only when there's
+     * the position as "Album - N/M" whenever an album exists; show "N / M" alone only when there's
      * no album at all. */
     {
         const char *alb = st->album;
         char ab[240];
         if(alb[0] && st->playing_num[0])
-            snprintf(ab, sizeof ab, "%s  \xC2\xB7  %s", alb, st->playing_num);              /* Album · 3/19 */
+            snprintf(ab, sizeof ab, "%s  -  %s", alb, st->playing_num);              /* "Album - 3/19" */
         else if(alb[0])
             snprintf(ab, sizeof ab, "%s", alb);                                             /* Album */
         else if(st->playing_num[0]){

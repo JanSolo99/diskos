@@ -51,7 +51,7 @@ static void tick_cb(lv_timer_t *t)
         /* Counting: there is no denominator yet, so don't fake one. An indeterminate
          * label is honest and still shows the scan is alive. */
         lv_arc_set_value(g_arc, 0);
-        lv_label_set_text(g_pct, "\xE2\x80\xA6");        /* ellipsis */
+        lv_label_set_text(g_pct, "...");        /* ellipsis */
         lv_label_set_text(g_phase, "Counting files");
         lv_label_set_text(g_count, "");
         lv_label_set_text(g_file, "");
@@ -92,7 +92,7 @@ void scanview_create(lv_obj_t *root)
     lv_obj_set_style_arc_color(g_arc, ui_current_accent(), LV_PART_INDICATOR);
 
     g_pct = lv_label_create(root);
-    lv_label_set_text(g_pct, "\xE2\x80\xA6");
+    lv_label_set_text(g_pct, "...");
     lv_obj_set_width(g_pct, 360);
     lv_obj_align(g_pct, LV_ALIGN_CENTER, 0, -34);
     lv_obj_set_style_text_align(g_pct, LV_TEXT_ALIGN_CENTER, 0);

@@ -283,7 +283,7 @@ static void bt_conn_poll_cb(lv_timer_t *t){
             snprintf(g_bt_autorouted, sizeof g_bt_autorouted, "%s", g_bt_conn_mac);
             ui_toast("Connected");
         } else {
-            ui_toast("Paired \xE2\x80\x93 audio stays on player");
+            ui_toast("Paired - audio stays on player");
         }
         scan_kick();                        /* instant re-list (device already known) -> ✓, no 13s re-scan */
         return;

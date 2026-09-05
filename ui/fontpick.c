@@ -71,7 +71,7 @@ static void install_poll_cb(lv_timer_t *t)
         return;                                   /* nothing persisted, nothing changed */
     }
     cfg_set_str("font_file", g_inst_name);
-    ui_toast("Applying font\xE2\x80\xA6");
+    ui_toast("Applying font...");
     lv_timer_t *r = lv_timer_create(restart_now, 900, NULL);
     lv_timer_set_repeat_count(r, 1);
 }
@@ -93,7 +93,7 @@ static void install_start(const char *name)
     pthread_attr_destroy(&at);
     if(rc != 0){ atomic_store(&g_inst_busy, 0); ui_toast("Couldn't load that font"); return; }
 
-    ui_toast("Installing font\xE2\x80\xA6");
+    ui_toast("Installing font...");
     if(!g_inst_poll) g_inst_poll = lv_timer_create(install_poll_cb, 120, NULL);
 }
 
