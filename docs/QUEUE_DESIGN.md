@@ -155,6 +155,21 @@ Verdict: **best outcome if it pans out; needs the most RE.**
 Nothing gets built until these three questions are answered. All of it runs over Debug Mode
 SSH on a device with a **verified restore point already saved**.
 
+**`tools/diskos-probe.sh` runs P1 and P2 for you**, together with the kernel-tick question
+that `docs/POWER_OPTIMIZATION_PLAN.md` is blocked on - one trip, one report file:
+
+```sh
+cd ~/diskos-build
+DISKOS_IP=<ip> DISKOS_PW=<debug-password> tools/diskos-probe.sh              # read-only
+DISKOS_IP=<ip> DISKOS_PW=<debug-password> tools/diskos-probe.sh --marker     # the P2 test
+```
+
+The default run touches nothing. `--marker` and `--append` write to `LIST_SONG_0`, which is
+the player's scratch table - playing anything from the Library rebuilds it, so both are
+undone by one tap. Neither sends an IPC frame, so neither can wedge the audio path. The
+script never touches `mq_player`. The manual commands below are what it runs, kept here so
+the reasoning is legible and so you can re-run a single step by hand.
+
 ### P1. What is actually in `LIST_SONG_0`?
 
 Read-only, zero risk. Play an album, then:

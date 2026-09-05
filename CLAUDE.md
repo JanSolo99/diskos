@@ -270,6 +270,9 @@ Do not reflash to test a UI change. Enable Debug Mode on the device for SSH, the
 tools/diskos-deploy.sh <ip> <password>   # build, verify by md5, hot-reload, prune stock safely
 tools/diskos-shot.sh                     # framebuffer to PNG
 tools/diskos-touch.sh                    # inject taps/swipes
+tools/diskos-probe.sh                    # one-trip hardware probe: LIST_SONG_0 shape, whether
+                                         # the player re-reads it, kernel tick, measured wake
+                                         # rate. Read-only unless given --marker / --append.
 ```
 
 See `docs/DEV_WORKFLOW.md`. Hand-deployed binaries revert on reboot (S97 verifies `/usr/data/mq_ui`
