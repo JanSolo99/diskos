@@ -724,7 +724,12 @@ static void mark_seen(const char *path){
 }
 /* Merge one file into SONG: record it as seen, then UPDATE the existing PATH in place (preserving ID +
  * ACCENT), or INSERT a new row if the PATH is new. Any DB error sets g_scan_err (blocks the commit). */
-static void upsert_song(const char *path, const char *fname){
+/* `mtime` is the file's modification time, used as ADD_TIME. It is the closest
+ * thing to "when did this arrive on the card" that costs nothing - the walk has
+ * already stat()ed the file, so there is no extra I/O. Copying files onto the SD
+ * card preserves or sets mtime, so newly-added music sorts newest-first, which is
+ * the entire point of the Recently Added view. */
+static void upsert_song(const char *path, const char *fname, long mtime){
     tags_t t;
     if(!tags_from_file(path, fname, &t)){
         mark_seen(path);   /* unreadable this pass -> keep any existing row; don't clobber good tags */
@@ -749,7 +754,12 @@ static void upsert_song(const char *path, const char *fname){
     sqlite3_reset(g_ins); sqlite3_clear_bindings(g_ins);
     sqlite3_bind_text(g_ins, 1, path, -1, SQLITE_TRANSIENT);
     bind_tags(g_ins, 2, fname, t.title, t.album, t.artist, t.genre);
-    sqlite3_bind_int64(g_ins, 12, (sqlite3_int64)1782180000);   /* ADD_TIME */
+    /* ADD_TIME was a hardcoded constant - the same value for every row ever
+     * scanned - which made "Recently Added" an arbitrary ordering rather than a
+     * wrong one. The file's mtime is a real timestamp and costs no extra syscall.
+     * Only INSERT sets it: the UPDATE path deliberately leaves ADD_TIME alone so a
+     * rescan does not reset when a track was added. */
+    sqlite3_bind_int64(g_ins, 12, (sqlite3_int64)(mtime > 0 ? mtime : 0));
     bind_extra(g_ins, 13, &t);              /* 13=DISC 14=TRACK 15=ALBUM_ARTIST 16=code 17=DURATION */
     if(sqlite3_step(g_ins)==SQLITE_DONE){ pthread_mutex_lock(&g_mu); g_done++; pthread_mutex_unlock(&g_mu); }
     else g_scan_err=1;   /* insert failure (disk full, DB corruption) must block the commit */
@@ -823,7 +833,7 @@ static void walk(const char *dir, int depth){
             memcpy(g_curname, e->d_name, nlen);
             g_curname[nlen] = 0;
             pthread_mutex_unlock(&g_mu);
-            upsert_song(path, e->d_name);
+            upsert_song(path, e->d_name, (long)st.st_mtime);
         }
     }
     if(errno) g_scan_err=1;                   /* readdir error -> this directory listing was incomplete */
