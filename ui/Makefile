@@ -10,6 +10,12 @@ LVGL  ?= $(APP)/lvgl
 CROSS ?= mipsel-linux-musl-
 CC    := $(CROSS)gcc
 
+# Pin the default goal instead of leaving it to whichever rule happens to come first.
+# The Docker builder runs a bare `make`, so anything that lands above mq_ui silently
+# becomes what a plain `make` builds - and it exits 0 having produced no binary, which
+# reads as "the build worked but the deploy did nothing".
+.DEFAULT_GOAL := mq_ui
+
 CFLAGS := -Os -pipe -std=gnu11 -static -pthread -D_GNU_SOURCE -DLV_CONF_INCLUDE_SIMPLE \
   -I$(APP) -I$(NUI) -Wall -MMD -MP
 LDFLAGS := -static -pthread
@@ -27,17 +33,23 @@ OBJS := $(LVGL_SRCS:.c=.o) $(APP_SRCS:.c=.o) $(APP)/sqlite3.o
 # binary on the device; this makes that answerable by looking at the screen instead of
 # hashing the binary over SSH.
 #
-# Regenerated on every make but rewritten ONLY when the value changes, so it costs one
-# recompile of settings.c per real build and nothing on a no-op make. A plain UTC
-# timestamp rather than a git SHA: the Docker builder bind-mounts ui/ alone, so there is
-# no .git in the container to read, and a timestamp differs for uncommitted work too -
-# which is exactly the case you are trying to tell apart.
-.PHONY: FORCE
-FORCE:
-$(APP)/buildid.h: FORCE
-	@id=`date -u +%Y%m%d-%H%M`; \
-	 echo "#define DISKOS_BUILD \"$$id\"" > $@.tmp; \
-	 cmp -s $@.tmp $@ 2>/dev/null || mv -f $@.tmp $@; rm -f $@.tmp
+# Rewritten ONLY when the value changes, so it costs one recompile of about.c per real
+# build and nothing on a no-op make. A plain UTC timestamp rather than a git SHA: the
+# Docker builder bind-mounts ui/ alone, so there is no .git in the container to read,
+# and a timestamp differs for uncommitted work too - which is exactly the case you are
+# trying to tell apart.
+#
+# Done as a parse-time $(shell ...) rather than a rule, deliberately. A rule needs a
+# FORCE prerequisite, and a bare `FORCE:` target sitting above mq_ui silently becomes
+# make's DEFAULT GOAL - so `make` with no arguments builds nothing and exits 0. The
+# Docker builder runs exactly that bare `make`, while the documented fast check names
+# mq_ui explicitly, so the breakage showed up ONLY in the cross build. This form adds
+# no target at all, so it cannot become the default goal.
+$(shell id=`date -u +%Y%m%d-%H%M`; \
+        echo "#define DISKOS_BUILD \"$$id\"" > $(APP)/buildid.h.tmp; \
+        cmp -s $(APP)/buildid.h.tmp $(APP)/buildid.h 2>/dev/null \
+          || mv -f $(APP)/buildid.h.tmp $(APP)/buildid.h; \
+        rm -f $(APP)/buildid.h.tmp)
 $(APP)/about.o: $(APP)/buildid.h
 
 mq_ui: $(OBJS)
