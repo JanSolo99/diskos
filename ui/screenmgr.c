@@ -120,6 +120,7 @@ static void transition(int from, int to, int dir)
     else if (to == SCR_TUNE)  tune_refresh();
     else if (to == SCR_SAVER) saver_show_sync();
     else if (to == SCR_PLVIEW) plview_refresh();   /* fresh song list every entry (no stale tap positions) */
+    else if (to == SCR_QUEUE)  queue_refresh();    /* re-aim at the player's current list + rebuild rows */
     else if (to == SCR_LIBRARY) library_refresh(); /* pick up playlists created (NP New Playlist) or imported
                                                     * (Settings) elsewhere, without needing a restart */
 
@@ -312,6 +313,7 @@ void screens_init(void)
     s_roots[SCR_DEBUG] = screen_make_root(parent);
     s_roots[SCR_SCAN] = screen_make_root(parent);
     s_roots[SCR_FONTPICK] = screen_make_root(parent);
+    s_roots[SCR_QUEUE]    = screen_make_root(parent);
 
     /* depth scrim: a full-screen translucent-black overlay, created LAST so it sits above the
      * roots in sibling order; re-parented in z during a transition to dim the screen beneath the
@@ -346,6 +348,7 @@ void screens_init(void)
     debug_create(s_roots[SCR_DEBUG]);
     scanview_create(s_roots[SCR_SCAN]);
     fontpick_create(s_roots[SCR_FONTPICK]);
+    queue_create(s_roots[SCR_QUEUE]);
     apps_create(s_roots[SCR_APPS]);
     nphub_create(s_roots[SCR_NPHUB]);
     plpick_create(s_roots[SCR_PLPICK]);

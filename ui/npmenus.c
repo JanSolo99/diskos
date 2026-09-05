@@ -263,6 +263,7 @@ void plpick_create(lv_obj_t *root){
 /* ---- Now Playing hub (SCR_NPHUB): swipe-right page. Secondary actions for
  * the current track (play-mode & favorite live on the Now Playing screen). - */
 static void hub_eq_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ screen_show(SCR_TUNE); } }
+static void hub_queue_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ screen_show(SCR_QUEUE); } }
 
 static void fsart_deferred_cb(lv_timer_t *t){ lv_timer_delete(t); ui_np_fsart_open(); }
 static void hub_fsart_cb(lv_event_t *e){
@@ -275,6 +276,7 @@ static void hub_fsart_cb(lv_event_t *e){
 void nphub_create(lv_obj_t *root){
     panel_header(root, "Options");
     lv_obj_t *list = panel_list(root);
+    menu_row(list, "Queue",          hub_queue_cb,  NULL);
     menu_row(list, "Full-screen Art", hub_fsart_cb,  NULL);
     menu_row(list, "Equalizer",       hub_eq_cb,     NULL);
     menu_row(list, "Song Info",       ctx_info_cb,   NULL);
@@ -314,7 +316,8 @@ void tune_refresh(void){
 
 static void cyc_apply(const char *key, const char *const *opts, int n, void *valobj, int dir){
     int v = cfg_get_int(key, 0) + dir;
-    if(v<0) v=n-1; if(v>=n) v=0;
+    if(v<0) v=n-1;
+    if(v>=n) v=0;
     cfg_set_int(key, v);
     if(!strcmp(key,"work_mode")) ui_set_workmode(v);
     else if(!strcmp(key,"eq_preset")) ui_apply_eq(v);

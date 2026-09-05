@@ -71,7 +71,8 @@ int ui_get_swipe_thresh(void){ return g_swipe_thresh; }
 static _Atomic int g_bl_idle = 0;
 int ui_main_is_idle(void){ return g_bl_idle; }
 void ui_apply_swipe_thresh(int px){   /* live, no flash write */
-    if(px < 20) px = 20; if(px > 200) px = 200;
+    if(px < 20) px = 20;
+    if(px > 200) px = 200;
     g_swipe_thresh = px;
 }
 void ui_set_swipe_thresh(int px){     /* live + persist */
@@ -382,7 +383,8 @@ void ui_seek_to(long ms){
 void ui_apply_eq(int preset){
     /* 0..10 = built-in presets (off..retro, sibilance 1/2); 11..20 = user/custom PEQ slots
      * (User 1 = 11). Cap at 20 so the custom EQ can select its slot. */
-    if(preset < 0) preset = 0; if(preset > 20) preset = 20;
+    if(preset < 0) preset = 0;
+    if(preset > 20) preset = 20;
     char f[16]; snprintf(f, sizeof f, "0689000C%04X", preset);
     ipc_send_cmd(f);
     fprintf(stderr,"eq %d -> %s\n", preset, f); fflush(stderr);
@@ -739,7 +741,8 @@ void ui_invalidate_play_scope(void){ g_play_scope[0] = '\0'; g_play_pendscope[0]
  * 0715 + LEN(000C) + <level 4hex>).  The player maps this through the same
  * cs43131 gain path as the hardware vol keys. */
 int ui_set_volume(int vol){
-    if(vol < 0) vol = 0; if(vol > VOL_MAX) vol = VOL_MAX;
+    if(vol < 0) vol = 0;
+    if(vol > VOL_MAX) vol = VOL_MAX;
     char f[16]; snprintf(f, sizeof f, "0715000C%04X", vol);
     int rc = ipc_send_cmd(f);
     fprintf(stderr,"set volume %d -> %s (rc=%d)\n", vol, f, rc); fflush(stderr);
@@ -795,6 +798,27 @@ void ui_play_list(int list_type, const char *name, int pos1){
 void ui_play_playlist(long pid, int pos){
     char ids[24]; snprintf(ids, sizeof ids, "%ld", pid);
     ui_play_list(5, ids, pos);
+}
+/* Read the list the player currently has built (g_play_scope = "<list_type>:<name>").
+ * Used by the Queue screen so it always mirrors what the player is about to play.
+ * Falls back to all-songs (type 1, empty name) when nothing has been loaded yet -
+ * the same scope the first song-tap from a flat list uses. */
+void ui_play_scope_get(int *list_type, char *name, int cap){
+    *list_type = 1;
+    if(name && cap > 0) name[0] = '\0';
+    /* Group playback has no single target path to prove, so its rebuild cannot
+     * populate g_play_scope. Once that rebuild has completed, its pending scope
+     * is the best available description of the list the player just built. */
+    const char *scope = g_play_scope;
+    if(!scope[0] && !g_play_pending && !g_play_dirty && g_play_pendscope[0]) scope = g_play_pendscope;
+    if(!scope[0]) return;
+    char tmp[260]; snprintf(tmp, sizeof tmp, "%s", scope);
+    char *colon = strchr(tmp, ':');
+    if(!colon) return;
+    *colon = '\0';
+    int t = atoi(tmp);
+    if(t > 0 && t <= 0xFFFF) *list_type = t;
+    if(name && cap > 0) snprintf(name, cap, "%s", colon + 1);
 }
 /* Favourite/unfavourite the CURRENT song (0104: 1=love -> MY_LOVE, 0=unlove). */
 void ui_set_favorite(int on){ g_play_scope[0] = '\0'; g_play_pendscope[0] = '\0'; ipc_send_cmd(on ? "0104000C0001" : "0104000C0000"); }

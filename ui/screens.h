@@ -6,7 +6,7 @@
 #include "ipc.h"
 #include "theme.h"   /* palette + font tokens: every screen paints from these */
 #include <stdbool.h>
-enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTINGS_GROUP, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_SCAN, SCR_FONTPICK, SCR_COUNT };
+enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTINGS_GROUP, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_SCAN, SCR_FONTPICK, SCR_QUEUE, SCR_COUNT };
 void screens_init(void);
 void screen_show(int which);
 void screen_back(void);
@@ -99,6 +99,9 @@ void fontpick_open(void);
 
 /* accent plumbing: the live accent + per-screen repaint so no surface shows a stale colour */
 lv_color_t ui_current_accent(void);
+/* queue screen (queue.c) */
+void queue_create(lv_obj_t *root);
+void queue_refresh(void);   /* re-aim at the current play scope + rebuild the track list */
 /* Standard screen header: back-chevron (tucked out of the clipped top-left) + centred title, clear of
  * the chevron. Back taps call screen_back(). Returns the title label so screens with a DYNAMIC title
  * (e.g. Library retitling to Songs/Albums) can update it. Use on every detail/list screen for one
@@ -161,6 +164,9 @@ void ui_invalidate_play_scope(void);   /* clear LIST_SONG_0 scope cache after a 
  * name = artist/album/genre (NULL/"" for all); pos1 = 1-based start track. */
 void ui_play_list(int list_type, const char *name, int pos1);
 void ui_play_playlist(long pid, int pos);
+/* read the list currently built in the player's LIST_SONG_0 ("<type>:<name>");
+ * falls back to all-songs (type 1, empty name) when nothing is loaded. */
+void ui_play_scope_get(int *list_type, char *name, int cap);
 /* swipe sensitivity (px of horizontal travel needed for a back-swipe); lower = more sensitive */
 void ui_set_swipe_thresh(int px);
 void ui_apply_swipe_thresh(int px);   /* live apply, no persist (for slider drag) */
