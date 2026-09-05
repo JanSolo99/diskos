@@ -110,6 +110,10 @@ int  mdb_queue_count(void);                 /* rows currently in the queue */
 int  mdb_queue_rows(mdb_song_t *out, int cap);
 int  mdb_queue_playing_id(void);            /* LIST_SONG_0.ID of the playing row, 0 if unknown */
 int  mdb_queue_append(const char *path);    /* add to the end */
+/* Append many songs by SONG.ID in one transaction - a whole album or artist.
+ * Returns the number of rows actually added. One statement per row would be a
+ * commit per row, which on a 20-track album is 20 fsyncs on a flash device. */
+int  mdb_queue_append_ids(const int *ids, int n);
 int  mdb_queue_insert_after(int after_id, const char *path);  /* "play next" when given the playing row */
 int  mdb_queue_remove(int id);              /* drop one row, closing the gap */
 int  mdb_queue_clear_after(int id);         /* drop everything past `id` (keeps what is playing) */

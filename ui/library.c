@@ -349,24 +349,118 @@ static void group_cb(lv_event_t *e){
     g_view=VIEW_GROUP;
     library_reload();
 }
-/* Long-press an album/artist/genre row -> play the whole group right away
- * (saves drilling in + tapping Play All). Short tap still drills in. */
+/* ---- long-press an album / artist / genre row ------------------------------
+ * Used to play the whole group immediately. It now offers "Play all" and "Add to
+ * queue", matching the sheet a song row shows, so one gesture means one thing
+ * everywhere: hold = do something bigger with this row.
+ *
+ * The group is resolved to a list of SONG ids at the moment the action is taken,
+ * not when the sheet opens - a reload between the two would invalidate a cached
+ * index, and the ids are what both actions need anyway. */
+static int  g_gsheet_lt;                 /* player list_type: 2 artist, 3 album, 10 genre */
+static int  g_gsheet_axis;               /* which Artists axis this row came from */
+static char g_gsheet_name[MDB_STR];
+static lv_obj_t *g_gsheet;
+
+static void gsheet_close(void){ if(g_gsheet){ lv_obj_del(g_gsheet); g_gsheet = NULL; } }
+static void gsheet_bg_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) gsheet_close(); }
+
+static void gsheet_play_cb(lv_event_t *e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
+    ui_set_workmode(0);                                   /* sequential */
+    ui_play_list(g_gsheet_lt, g_gsheet_name, 1);
+    gsheet_close();
+    screen_show(SCR_NOWPLAYING);
+}
+
+static void gsheet_queue_cb(lv_event_t *e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
+    /* 512 is a cap, not an allocation strategy: two 2KB stack arrays are fine in an
+     * event callback, and a truncated queue beats a malloc that can fail here. */
+    enum { GQ_MAX = 512 };
+    const mdb_song_t *buf[GQ_MAX];
+    int n = 0;
+    if(g_gsheet_lt == 3)       n = mdb_album_songs(g_gsheet_name, buf, GQ_MAX);
+    else if(g_gsheet_lt == 10) n = mdb_genre_songs(g_gsheet_name, buf, GQ_MAX);
+    /* g_gsheet_axis, NOT g_ar_axis: the hold does not drill in, so g_ar_axis still
+     * holds whichever axis was last drilled and would resolve the wrong artist set. */
+    else                       n = mdb_artist_songs(g_gsheet_axis, g_gsheet_name, buf, GQ_MAX);
+    if(n <= 0){ ui_toast("Nothing to queue"); gsheet_close(); return; }
+
+    /* Collected in the SAME order the list shows, which for an album is disc/track
+     * order - so a queued album plays the way it was recorded rather than the way
+     * the database happened to return it. */
+    int ids[512];
+    for(int i = 0; i < n; i++) ids[i] = buf[i]->id;
+    int added = ui_queue_add_ids(ids, n);
+
+    if(added){
+        char msg[48];
+        snprintf(msg, sizeof msg, "Queued %d track%s", added, added == 1 ? "" : "s");
+        ui_toast(msg);
+    } else {
+        ui_toast("Couldn't queue that");
+    }
+    gsheet_close();
+}
+
+static void gsheet_button(lv_obj_t *card, int y, const char *txt, lv_event_cb_t cb){
+    lv_obj_t *b = lv_button_create(card);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_pos(b, 20, y);
+    lv_obj_set_size(b, 200, 44);
+    lv_obj_set_style_radius(b, 12, 0);
+    lv_obj_set_style_bg_color(b, th_fill3(), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(b, th_card_press(), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_center(l);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
+    lv_obj_set_style_text_color(l, th_text(), 0);
+}
+
 static void group_play_cb(lv_event_t *e){
     if(lv_event_get_code(e)!=LV_EVENT_LONG_PRESSED) return;
+    if(g_gsheet) return;
     int gi=(int)(uintptr_t)lv_event_get_user_data(e);
+
     if(g_view==VIEW_ARTIST_ALBUMS){
-        /* hold "All Songs" -> everything by the artist; hold an album -> that album */
-        ui_set_workmode(0);
-        if(gi < 0) ui_play_list(2, g_artist, 1);
-        else       ui_play_list(3, g_gnames[gi], 1);
-        screen_show(SCR_NOWPLAYING);
-        return;
+        /* row -1 is the synthetic "All Songs"; the rest are this artist's albums.
+         * Here g_ar_axis IS right - we drilled in to get to this view. */
+        g_gsheet_axis = g_ar_axis;
+        if(gi < 0){ g_gsheet_lt = 2; snprintf(g_gsheet_name, MDB_STR, "%s", g_artist); }
+        else      { g_gsheet_lt = 3; snprintf(g_gsheet_name, MDB_STR, "%s", g_gnames[gi]); }
+    } else {
+        g_gsheet_lt = (g_view==VIEW_ALBUMS)?3:(g_view==VIEW_GENRES)?10:2;
+        /* Resolve the axis from the view we are LOOKING AT, the same way group_cb
+         * does on a tap - a hold never drills in, so nothing else would set it. */
+        g_gsheet_axis = (g_view==VIEW_ALBUM_ARTISTS) ? MDB_AR_ALBUM : MDB_AR_TRACK;
+        snprintf(g_gsheet_name, MDB_STR, "%s", g_gnames[gi]);
     }
-    int kind = (g_view==VIEW_ALBUMS)?1:(g_view==VIEW_GENRES)?3:2;
-    int lt   = (kind==1)?3:(kind==3)?10:2;   /* 3=album, 10=genre, 2=artist */
-    ui_set_workmode(0);                        /* sequential */
-    ui_play_list(lt, g_gnames[gi], 1);
-    screen_show(SCR_NOWPLAYING);
+
+    g_gsheet = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(g_gsheet);
+    lv_obj_set_size(g_gsheet, 360, 360);
+    lv_obj_set_pos(g_gsheet, 0, 0);
+    lv_obj_set_style_bg_color(g_gsheet, th_scrim(), 0);
+    lv_obj_set_style_bg_opa(g_gsheet, th_scrim_opa(), 0);
+    lv_obj_clear_flag(g_gsheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_gsheet, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_gsheet, gsheet_bg_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *card = lv_obj_create(g_gsheet);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, 240, 124);
+    lv_obj_center(card);
+    lv_obj_set_style_radius(card, 20, 0);
+    lv_obj_set_style_bg_color(card, th_card(), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    gsheet_button(card, 14, "Play all",     gsheet_play_cb);
+    gsheet_button(card, 66, "Add to queue", gsheet_queue_cb);
 }
 static void menu_cb(lv_event_t *e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
@@ -627,7 +721,7 @@ static void library_reload(void){
     static int s_group_hold_hint=0, s_fav_hold_hint=0;
     if((g_view==VIEW_ALBUMS || g_view==VIEW_ARTISTS || g_view==VIEW_ALBUM_ARTISTS ||
         g_view==VIEW_GENRES || g_view==VIEW_ARTIST_ALBUMS) && !s_group_hold_hint){
-        s_group_hold_hint=1; ui_toast("Hold an item to play all");
+        s_group_hold_hint=1; ui_toast("Hold an item to play or queue it");
     } else if(g_view==VIEW_FAVS && !s_fav_hold_hint){
         s_fav_hold_hint=1; ui_toast("Hold to remove");
     }

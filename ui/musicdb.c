@@ -793,6 +793,37 @@ int mdb_queue_append(const char *path){
     return q_insert_at(d, last + 1, path);   /* nothing shifts: the trivial case */
 }
 
+int mdb_queue_append_ids(const int *ids, int n){
+    if(!ids || n <= 0) return 0;
+    sqlite3 *d = db(); if(!d) return 0;
+    int last = 0;
+    sqlite3_stmt *st;
+    if(sqlite3_prepare_v2(d, "SELECT IFNULL(MAX(ID),0) FROM LIST_SONG_0;", -1, &st, NULL) == SQLITE_OK){
+        if(sqlite3_step(st) == SQLITE_ROW) last = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+    }
+    if(sqlite3_exec(d, "BEGIN IMMEDIATE;", 0, 0, 0) != SQLITE_OK) return 0;
+    const char *sql = "INSERT INTO LIST_SONG_0 (ID,LIST_ID,POS_ID," Q_COLS ") "
+                      "SELECT ?,NULL,NULL," Q_COLS " FROM SONG WHERE ID=? LIMIT 1;";
+    if(sqlite3_prepare_v2(d, sql, -1, &st, NULL) != SQLITE_OK){
+        sqlite3_exec(d, "ROLLBACK;", 0, 0, 0);
+        return 0;
+    }
+    int added = 0;
+    for(int i = 0; i < n; i++){
+        sqlite3_reset(st); sqlite3_clear_bindings(st);
+        sqlite3_bind_int(st, 1, last + added + 1);
+        sqlite3_bind_int(st, 2, ids[i]);
+        /* A song id that is not in SONG (deleted between the list build and here)
+         * is skipped rather than aborting the whole append - the user asked for an
+         * album, and 19 of 20 tracks beats an error. */
+        if(sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(d) > 0) added++;
+    }
+    sqlite3_finalize(st);
+    sqlite3_exec(d, added ? "COMMIT;" : "ROLLBACK;", 0, 0, 0);
+    return added;
+}
+
 int mdb_queue_insert_after(int after_id, const char *path){
     if(after_id < 1 || !path || !path[0]) return 0;
     sqlite3 *d = db(); if(!d) return 0;

@@ -135,6 +135,27 @@ int main(void){
     ck(mdb_queue_count() == 2, "only the playing row and what precedes it remain");
     ck(contiguous(d),          "IDs still contiguous after clear");
 
+    printf("\n-- bulk append (a whole album) ---------------------------------------\n");
+    reset(d);
+    {
+        /* SONG ids 1..4 are the album. Queue it again so the queue holds it twice,
+         * which is exactly what "add this album to the queue" does while it plays. */
+        int ids[4] = {1, 2, 3, 4};
+        ck(mdb_queue_append_ids(ids, 4) == 4, "all four rows appended");
+        snapshot(d, snap, sizeof snap);
+        printf("     %s\n", snap);
+        ck(mdb_queue_count() == 8, "queue grew from 4 to 8");
+        ck(contiguous(d),          "IDs still contiguous after a bulk append");
+        ck(strcmp(snap, "1:One,2:Two,3:Three,4:Four,5:One,6:Two,7:Three,8:Four") == 0,
+           "appended in the order given, after the existing rows");
+    }
+    {
+        reset(d);
+        int bad[3] = {1, 9999, 2};   /* 9999 is not a SONG id */
+        ck(mdb_queue_append_ids(bad, 3) == 2, "an unknown id is skipped, not fatal");
+        ck(contiguous(d), "...and the skip leaves no gap in the IDs");
+    }
+
     printf("\n-- the player's row shape is mirrored --------------------------------\n");
     reset(d);
     mdb_queue_append("/sd/x.mp3");

@@ -58,6 +58,13 @@ static int queue_add(const char *path, int next)
 int ui_queue_add_next(const char *path){ return queue_add(path, 1); }
 int ui_queue_add_end (const char *path){ return queue_add(path, 0); }
 
+/* Append a whole album / artist / genre. Same ownership rule as a single add. */
+int ui_queue_add_ids(const int *ids, int n){
+    int added = mdb_queue_append_ids(ids, n);
+    if(added) ui_queue_take_ownership();
+    return added;
+}
+
 /* ---- rows ---------------------------------------------------------------- */
 
 static void row_play_cb(lv_event_t *e)

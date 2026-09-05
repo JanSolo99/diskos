@@ -53,8 +53,8 @@ can edit its live queue with no rebuild and no IPC tag. See `docs/QUEUE_DESIGN.m
 - [x] **Scope ownership** - `3d3b5f9`. The `Q:` sentinel marks the list as the user's, so nothing
   sends a rebuild over it; only an explicit "play something new" replaces the queue.
 - [x] **UI** - done, commit `3d3b5f9`: long-press a song -> *Play next* / *Add to queue*; the
-  Queue screen reads `LIST_SONG_0` directly and gained remove + clear. STILL TO DO: *Add to
-  queue* on album/artist rows (whole scope), and drag-to-reorder.
+  Queue screen reads `LIST_SONG_0` directly and gained remove + clear. Album, artist and genre
+  rows now hold for *Play all* / *Add to queue* too. STILL TO DO: drag-to-reorder.
 - [ ] **Fix "play all by artist"** [host]. Today it sends the player `list_type 2` + a name and
   the player filters `WHERE ARTIST=?`, so an album-artist row queues fewer tracks than the UI
   lists. Now that we can write `LIST_SONG_0` ourselves, we can build the exact list instead -

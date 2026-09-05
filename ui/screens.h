@@ -179,6 +179,8 @@ int  ui_queue_play_pos(int pos1);       /* jump within the queue; -1 if not owne
  * queue_add_next inserts after the playing track, queue_add_end appends. */
 int  ui_queue_add_next(const char *path);
 int  ui_queue_add_end(const char *path);
+/* append a whole group by SONG.ID; returns how many rows were added */
+int  ui_queue_add_ids(const int *ids, int n);
 /* swipe sensitivity (px of horizontal travel needed for a back-swipe); lower = more sensitive */
 void ui_set_swipe_thresh(int px);
 void ui_apply_swipe_thresh(int px);   /* live apply, no persist (for slider drag) */
