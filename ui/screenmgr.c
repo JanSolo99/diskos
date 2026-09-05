@@ -121,6 +121,7 @@ static void transition(int from, int to, int dir)
     else if (to == SCR_SAVER) saver_show_sync();
     else if (to == SCR_PLVIEW) plview_refresh();   /* fresh song list every entry (no stale tap positions) */
     else if (to == SCR_QUEUE)  queue_refresh();    /* re-aim at the player's current list + rebuild rows */
+    else if (to == SCR_SONGINFO) songinfo_refresh();  /* Year/Bitrate come from song.db, not the player */
     else if (to == SCR_LIBRARY) library_refresh(); /* pick up playlists created (NP New Playlist) or imported
                                                     * (Settings) elsewhere, without needing a restart */
 

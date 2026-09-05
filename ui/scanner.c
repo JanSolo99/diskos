@@ -48,6 +48,8 @@ typedef struct {
     char album_artist[TAGLEN];   /* TPE2 / ALBUMARTIST / aART - empty when the file has none */
     int  disc, track;            /* 0 = unknown; sorts LAST, matching the player's ORDER BY */
     long duration_ms;            /* 0 = unknown; the library shows a blank length for 0 */
+    int  year;                   /* 0 = unknown; stored as TEXT (stock schema's column type) */
+    int  bitrate_kbps;           /* 0 = unknown; the AVERAGE - see the note in upsert_song */
 } tags_t;
 
 /* "7", "07", "7/12", " 7 " -> 7.  Unparseable or absent -> 0 (= unknown).
@@ -57,6 +59,23 @@ static int tag_num(const char *s){
     int v = 0, any = 0;
     while(*s >= '0' && *s <= '9'){ if(v < 100000) v = v*10 + (*s - '0'); any = 1; s++; }
     return any ? v : 0;
+}
+
+/* Pull a 4-digit year out of whatever shape a date tag happens to be in: "1998",
+ * "1998-05", "1998-05-12T00:00:00Z" (ID3v2.4's TDRC is ISO-8601), or "12/05/1998".
+ * Takes the first run of EXACTLY four digits that lands in 1000..2999, so the day and
+ * month of a d/m/Y date are skipped rather than mistaken for the year. 0 = none. */
+static int tag_year(const char *s){
+    while(*s){
+        if(*s < '0' || *s > '9'){ s++; continue; }
+        const char *d = s;
+        while(*s >= '0' && *s <= '9') s++;
+        if(s - d == 4){
+            int v = (d[0]-'0')*1000 + (d[1]-'0')*100 + (d[2]-'0')*10 + (d[3]-'0');
+            if(v >= 1000 && v <= 2999) return v;
+        }
+    }
+    return 0;
 }
 
 /* ---- progress (published to the LVGL thread) ---- */
@@ -253,6 +272,13 @@ static int id3v2_read(FILE *f, tags_t *t){
                  * or parsing a Xing header, neither of which is worth it while this
                  * is present. Absent -> stays 0 -> the row shows a blank length. */
                 else if(!strcmp(k,"TLEN")||!strcmp(k,"TLE")) t->duration_ms = tag_num(val);
+                /* TDRC is v2.4's ISO-8601 recording time, TYER v2.3's bare year, TDRL
+                 * the release date. Deliberately NOT TORY/TOR: those carry the year of
+                 * the ORIGINAL release on a reissue, which is not the year anyone
+                 * expects to see next to the album they are holding. */
+                else if(!strcmp(k,"TDRC")||!strcmp(k,"TYER")||!strcmp(k,"TYE")||!strcmp(k,"TDRL")){
+                    if(!t->year) t->year = tag_year(val);
+                }
             }
         }
         p += fhdr + fsize;
@@ -273,6 +299,8 @@ static void id3v1_read(FILE *f, tags_t *t){
     /* ID3v1.1 puts the track number in byte 126 when byte 125 is NUL (plain v1 has
      * a 30-byte comment there, so a non-NUL 125 means there is no track number). */
     if(!t->track && v1[125] == 0 && v1[126]) t->track = v1[126];
+    /* bytes 93..96: a fixed 4-char year, Latin-1, space-padded when absent. */
+    if(!t->year){ char y[8]; id3_decode(0, v1+93, 4, y, sizeof y); t->year = tag_year(y); }
 }
 
 static uint32_t le32(const unsigned char *p){ return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
@@ -310,6 +338,10 @@ static void vc_parse(const unsigned char *b, uint32_t len,
                 else if(!strcasecmp(k,"DISCNUMBER")  && !t->disc)  t->disc  = tag_num(v);
                 /* only a fallback: FLAC's STREAMINFO is exact and already ran */
                 else if(!strcasecmp(k,"LENGTH") && !t->duration_ms) t->duration_ms = tag_num(v);
+                /* DATE is the standard field and is usually a full ISO date; YEAR is
+                 * the older spelling some rippers still write. */
+                else if((!strcasecmp(k,"DATE") || !strcasecmp(k,"YEAR")) && !t->year)
+                    t->year = tag_year(v);
             }
         }
         off += clen;
@@ -437,8 +469,14 @@ static void mp4_ilst_field(FILE *f, const char *type, long size,
         return;
     }
 
+    /* (C)day is text like every other (C)-marked atom, but it lands in an int, so it
+     * decodes into a local and is converted below. Its "first writer wins" guard has to
+     * be t->year rather than dst[0], since the local always starts empty. */
+    char daybuf[TAGLEN]; daybuf[0] = 0;
+
     char *dst = NULL;
-    if     (!memcmp(type, "\xA9""nam", 4)) dst = t->title;
+    if     (!memcmp(type, "\xA9""day", 4)){ if(t->year) return; dst = daybuf; }
+    else if(!memcmp(type, "\xA9""nam", 4)) dst = t->title;
     else if(!memcmp(type, "\xA9""ART", 4)) dst = t->artist;
     else if(!memcmp(type, "\xA9""alb", 4)) dst = t->album;
     else if(!memcmp(type, "aART", 4))       dst = t->album_artist;   /* iTunes album artist */
@@ -461,7 +499,8 @@ static void mp4_ilst_field(FILE *f, const char *type, long size,
     for(long i = 0; i < vlen; i++) if(buf[i] >= 0x20 || buf[i] == '\n'){ printable = 1; break; }
     if(!printable) return;
     id3_decode(3, buf, (int)vlen, dst, TAGLEN);   /* enc 3 = UTF-8 passthrough + trim */
-    if(dst == t->genre) genre_clean(t->genre);
+    if(dst == daybuf)        t->year = tag_year(daybuf);
+    else if(dst == t->genre) genre_clean(t->genre);
 }
 static void mp4_walk(FILE *f, long end, int depth,
                      tags_t *t)
@@ -553,6 +592,11 @@ static void apev2_read(FILE *f, tags_t *t)
                                            dst = t->album_artist;
         if(dst && !dst[0] && vsize > 0)
             id3_decode(3, b+off, (int)(vsize < TAGLEN-1 ? vsize : TAGLEN-1), dst, TAGLEN);
+        else if(vsize > 0 && !strcasecmp(key,"Year") && !t->year){
+            char y[32];
+            id3_decode(3, b+off, (int)(vsize < sizeof y - 1 ? vsize : sizeof y - 1), y, sizeof y);
+            t->year = tag_year(y);
+        }
         else if(vsize > 0 && (!strcasecmp(key,"Track") || !strcasecmp(key,"Disc"))){
             char num[32];   /* APEv2 numerics are text, same "n/total" shape as ID3 */
             id3_decode(3, b+off, (int)(vsize < sizeof num - 1 ? vsize : sizeof num - 1), num, sizeof num);
@@ -649,7 +693,7 @@ static const char *INS_SONG =
     /* EXPLICIT ?N parameters: SQLite numbers a bare '?' by order of appearance, so the
      * DISC/TRACK placeholders (columns 7-8) would otherwise renumber every bind after
      * them. Numbering them 13.. keeps bind_tags' contiguous 2..11 block untouched. */
-    "ALBUM_ARTIST_CODE) VALUES (?1,?2,?3,?4,?5,?6,?13,?14,0,0,0,0,?17,?7,?8,?9,?10,?11,?12,0,0,0,0,'','',0,?15,?16);";
+    "ALBUM_ARTIST_CODE) VALUES (?1,?2,?3,?4,?5,?6,?13,?14,0,0,0,0,?17,?7,?8,?9,?10,?11,?12,0,0,0,?18,'',?19,0,?15,?16);";
 /* MERGE (not delete+reinsert): UPDATE an existing PATH's metadata in place so its ID and ACCENT are
  * preserved - MEMORY_PLAY.MUSIC_ID (resume) and MY_LOVE.ID (favourites) are ID-keyed, so a delete+
  * reinsert with fresh autoincrement IDs used to break resume + favourites and wipe the art-accent cache
@@ -659,7 +703,8 @@ static const char *UPD_SONG =
     "NAME_CODE=?6,TITLE_CODE=?7,ALBUM_CODE=?8,ARTIST_CODE=?9,GENRE_CODE=?10,"
     /* rescanning an existing row must refresh these too, otherwise a library that
      * was indexed before diskOS read them would keep DISC/TRACK 0 for ever. */
-    "DISC=?12,TRACK=?13,ALBUM_ARTIST=?14,ALBUM_ARTIST_CODE=?15,DURATION=?16 WHERE PATH=?11;";
+    "DISC=?12,TRACK=?13,ALBUM_ARTIST=?14,ALBUM_ARTIST_CODE=?15,DURATION=?16,"
+    "BIT_RATE=?17,SONG_PRODUCTION_YEAR=?18 WHERE PATH=?11;";
 /* per-connection temp table of PATHs seen this scan; drives the post-walk delete of vanished songs. */
 static const char *SEEN_DDL = "CREATE TEMP TABLE IF NOT EXISTS seen(PATH TEXT PRIMARY KEY);";
 static const char *SEEN_INS = "INSERT OR IGNORE INTO seen(PATH) VALUES(?);";
@@ -698,13 +743,25 @@ static void bind_tags(sqlite3_stmt *s, int p0, const char *fname, const char *ti
     sqlite3_bind_int (s, p0+8, code4(artist));
     sqlite3_bind_int (s, p0+9, code4(genre));
 }
-/* Bind DISC/TRACK/ALBUM_ARTIST/ALBUM_ARTIST_CODE at `p0`..`p0+3`.
+/* Bind DISC/TRACK/ALBUM_ARTIST/ALBUM_ARTIST_CODE/DURATION/BIT_RATE/YEAR at `p0`..`p0+6`.
  * ALBUM_ARTIST binds NULL (not "") when the file has none, so "absent" stays
- * distinguishable from "tagged empty" - musicdb's IFNULL handles both. */
+ * distinguishable from "tagged empty" - musicdb's IFNULL handles both.
+ * SONG_PRODUCTION_YEAR is TEXT in the stock schema, so an unknown year binds "" to
+ * match what every row written before this had. */
 static void bind_extra(sqlite3_stmt *s, int p0, const tags_t *t){
     sqlite3_bind_int(s, p0+0, t->disc);
     sqlite3_bind_int(s, p0+1, t->track);
     sqlite3_bind_int64(s, p0+4, (sqlite3_int64)t->duration_ms);
+    sqlite3_bind_int(s, p0+5, t->bitrate_kbps);
+    if(t->year > 0){
+        /* 12, not 8: tag_year() only ever returns 1000..2999, but the compiler cannot
+         * see that and -Wformat-truncation is right to say an int needs 11 chars. Sized
+         * for any int rather than silenced. */
+        char y[12]; snprintf(y, sizeof y, "%d", t->year);
+        sqlite3_bind_text(s, p0+6, y, -1, SQLITE_TRANSIENT);   /* TRANSIENT: y is stack */
+    } else {
+        sqlite3_bind_text(s, p0+6, "", -1, SQLITE_STATIC);
+    }
     if(t->album_artist[0]){
         sqlite3_bind_text(s, p0+2, t->album_artist, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int (s, p0+3, code4(t->album_artist));
@@ -729,13 +786,25 @@ static void mark_seen(const char *path){
  * already stat()ed the file, so there is no extra I/O. Copying files onto the SD
  * card preserves or sets mtime, so newly-added music sorts newest-first, which is
  * the entire point of the Recently Added view. */
-static void upsert_song(const char *path, const char *fname, long mtime){
+static void upsert_song(const char *path, const char *fname, long mtime, long long fsize){
     tags_t t;
     if(!tags_from_file(path, fname, &t)){
         mark_seen(path);   /* unreadable this pass -> keep any existing row; don't clobber good tags */
         g_skipped++;
         return;
     }
+    /* Average bitrate, from two things we already have. There is no cheap exact answer:
+     * a VBR MP3's nominal rate is a lie and the true one needs a frame walk, while a
+     * FLAC's varies by the second. size*8/duration IS the average - which is what a
+     * player shows for VBR anyway - and it costs nothing, because the walk has already
+     * stat()ed the file. It counts tag and embedded-art bytes as if they were audio, so
+     * a track carrying a large cover reads a little high; that is the honest trade for
+     * not opening every file a second time. No duration -> 0 -> the UI shows "-". */
+    if(t.duration_ms > 0 && fsize > 0){
+        long long kbps = (fsize * 8000LL / t.duration_ms + 500) / 1000;
+        t.bitrate_kbps = (kbps > 0 && kbps < 100000) ? (int)kbps : 0;
+    }
+
     /* record as seen (drives the post-walk delete of paths that vanished from the SD) */
     sqlite3_reset(g_seen); sqlite3_clear_bindings(g_seen);
     sqlite3_bind_text(g_seen, 1, path, -1, SQLITE_TRANSIENT);
@@ -744,7 +813,7 @@ static void upsert_song(const char *path, const char *fname, long mtime){
     sqlite3_reset(g_upd); sqlite3_clear_bindings(g_upd);
     bind_tags(g_upd, 1, fname, t.title, t.album, t.artist, t.genre);
     sqlite3_bind_text(g_upd, 11, path, -1, SQLITE_TRANSIENT);
-    bind_extra(g_upd, 12, &t);              /* 12=DISC 13=TRACK 14=ALBUM_ARTIST 15=code 16=DURATION */
+    bind_extra(g_upd, 12, &t);              /* 12=DISC 13=TRACK 14=AA 15=code 16=DURATION 17=BIT_RATE 18=YEAR */
     if(sqlite3_step(g_upd)!=SQLITE_DONE){ g_scan_err=1; return; }
     if(sqlite3_changes(g_db) > 0){                     /* existing PATH updated in place */
         pthread_mutex_lock(&g_mu); g_done++; pthread_mutex_unlock(&g_mu);
@@ -760,7 +829,7 @@ static void upsert_song(const char *path, const char *fname, long mtime){
      * Only INSERT sets it: the UPDATE path deliberately leaves ADD_TIME alone so a
      * rescan does not reset when a track was added. */
     sqlite3_bind_int64(g_ins, 12, (sqlite3_int64)(mtime > 0 ? mtime : 0));
-    bind_extra(g_ins, 13, &t);              /* 13=DISC 14=TRACK 15=ALBUM_ARTIST 16=code 17=DURATION */
+    bind_extra(g_ins, 13, &t);              /* 13=DISC 14=TRACK 15=AA 16=code 17=DURATION 18=BIT_RATE 19=YEAR */
     if(sqlite3_step(g_ins)==SQLITE_DONE){ pthread_mutex_lock(&g_mu); g_done++; pthread_mutex_unlock(&g_mu); }
     else g_scan_err=1;   /* insert failure (disk full, DB corruption) must block the commit */
 }
@@ -833,7 +902,7 @@ static void walk(const char *dir, int depth){
             memcpy(g_curname, e->d_name, nlen);
             g_curname[nlen] = 0;
             pthread_mutex_unlock(&g_mu);
-            upsert_song(path, e->d_name, (long)st.st_mtime);
+            upsert_song(path, e->d_name, (long)st.st_mtime, (long long)st.st_size);
         }
     }
     if(errno) g_scan_err=1;                   /* readdir error -> this directory listing was incomplete */

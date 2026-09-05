@@ -30,6 +30,9 @@ int               mdb_song_path(int id, char *out, int cap);
 /* On-demand ALBUM for a song ID. 1 if a non-empty album was found. */
 int               mdb_song_album(int id, char *out, int cap);
 int               mdb_song_meta_by_path(const char *path, char *album, int acap, char *artist, int arcap);
+/* Year and average bitrate for a path (Song Info only; queried on screen entry).
+ * Either out-param is set to 0 when unknown. 1 if the path was found. */
+int               mdb_song_extra_by_path(const char *path, int *year, int *bitrate_kbps);
 /* 1-based position of a song within the player's rebuilt list for a given
  * list_type (0=all,2=artist,3=album,10=genre) + name, matching mq_player's
  * exact ORDER BY so a tap lands on the exact track. Returns >=1. */

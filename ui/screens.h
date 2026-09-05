@@ -28,6 +28,7 @@ void quicksettings_refresh(int playing);
 /* song info (songinfo.c) */
 void songinfo_create(lv_obj_t *root);
 void songinfo_set(const track_state_t *st);
+void songinfo_refresh(void);   /* screen entry: fill Year/Bitrate from song.db */
 /* Now Playing side menus (npmenus.c) + custom EQ (eqcustom.c) */
 void npmenu_create(lv_obj_t *root);
 void nphub_create(lv_obj_t *root);   /* right-swipe hub: Playback + Options buttons */

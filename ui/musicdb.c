@@ -327,6 +327,31 @@ int mdb_song_meta_by_path(const char *path, char *album, int acap, char *artist,
     return found;
 }
 
+/* Year + average bitrate for one path. Kept OUT of mdb_song_t and mdb_load(): only
+ * Song Info reads them, and mdb_load is the hot path that builds every list on screen.
+ * Queried on screen entry, not per track change, so this never runs during playback.
+ * Either out-param is left 0 when the column is empty - the scanner writes "" for an
+ * unknown year and 0 for an unknown bitrate, and rows scanned before those columns
+ * were populated have exactly that. Returns 1 if the path was found at all. */
+int mdb_song_extra_by_path(const char *path, int *year, int *bitrate_kbps){
+    if(year) *year = 0;
+    if(bitrate_kbps) *bitrate_kbps = 0;
+    if(!path || !path[0]) return 0;
+    sqlite3 *d = db(); if(!d) return 0;
+    sqlite3_stmt *st;
+    if(sqlite3_prepare_v2(d, "SELECT IFNULL(SONG_PRODUCTION_YEAR,''),IFNULL(BIT_RATE,0) "
+                             "FROM SONG WHERE PATH=? LIMIT 1;", -1, &st, NULL) != SQLITE_OK) return 0;
+    sqlite3_bind_text(st, 1, path, -1, SQLITE_STATIC);
+    int found = 0;
+    if(sqlite3_step(st) == SQLITE_ROW){
+        if(year) *year = atoi(colt(st,0));            /* TEXT column; "" -> 0 */
+        if(bitrate_kbps) *bitrate_kbps = sqlite3_column_int(st,1);
+        found = 1;
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
 /* The current/last "memory play" track (MEMORY_PLAY in song.db) + resume info,
  * so the UI can show what's playing on startup before any a2 frame arrives.
  * MEMORY_PLAY.MUSIC_ID maps to SONG.ID.  Returns 1 if a track was found. */

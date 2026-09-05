@@ -1,17 +1,28 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "screens.h"
+#include "musicdb.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 
-/* Song Info: a metadata detail page (title/artist/album/format/rate/duration/
- * file). Opened by tapping the Now Playing album art; back-swipe / back returns.
- * Populated from the live track_state_t via songinfo_set(). */
+/* Song Info: a metadata detail page (title/artist/album/year/format/rate/bitrate/
+ * duration/file). Opened by tapping the Now Playing album art; back-swipe / back
+ * returns.
+ *
+ * Most of it comes from the live track_state_t via songinfo_set() - the player is the
+ * source of truth for what is playing. Year and bitrate are the exception: the player
+ * reports neither, so they come from our own database, looked up by path in
+ * songinfo_refresh() when the screen is ENTERED. That keeps a DB query off both the
+ * per-frame path and the per-track-change path, for two rows nobody sees until they
+ * open this screen. */
 
-enum { F_TITLE, F_ARTIST, F_ALBUM, F_FORMAT, F_RATE, F_DURATION, F_FILE, F_COUNT };
-static const char *KEYS[F_COUNT] = { "Title","Artist","Album","Format","Sample Rate","Duration","File" };
+enum { F_TITLE, F_ARTIST, F_ALBUM, F_YEAR, F_FORMAT, F_RATE, F_BITRATE,
+       F_DURATION, F_FILE, F_COUNT };
+static const char *KEYS[F_COUNT] = { "Title","Artist","Album","Year","Format",
+                                     "Sample Rate","Bitrate","Duration","File" };
 static lv_obj_t *g_val[F_COUNT];
+static char      g_path[512];     /* the path songinfo_set last saw, for the DB lookup */
 
 void songinfo_create(lv_obj_t *root)
 {
@@ -59,8 +70,14 @@ void songinfo_set(const track_state_t *st)
     if(!g_val[0]) return;
     if(!st || !st->have_track){
         for(int i=0;i<F_COUNT;i++) if(g_val[i]) lv_label_set_text(g_val[i], "-");
+        g_path[0] = 0;
         return;
     }
+    /* Remember the path and blank the DB-sourced rows: they belong to whatever track
+     * was showing before, and songinfo_refresh() has not run for this one yet. */
+    snprintf(g_path, sizeof g_path, "%s", st->path);
+    lv_label_set_text(g_val[F_YEAR], "-");
+    lv_label_set_text(g_val[F_BITRATE], "-");
 
     lv_label_set_text(g_val[F_TITLE],  st->title[0]?st->title:"Untitled");
     lv_label_set_text(g_val[F_ARTIST], st->artist[0]?st->artist:"-");
@@ -90,4 +107,26 @@ void songinfo_set(const track_state_t *st)
     /* file basename */
     const char *base=strrchr(st->path,'/'); base = base?base+1:st->path;
     lv_label_set_text(g_val[F_FILE], base[0]?base:"-");
+
+    /* If this screen is the one on display, a track change has to refill the DB rows
+     * here: screenmgr's entry hook does not fire again while we are already on it, so
+     * they would otherwise sit blank until the user left and came back. One query per
+     * track change, and only while the screen is actually open. */
+    if(screen_current() == SCR_SONGINFO) songinfo_refresh();
+}
+
+/* Fill the two rows the player cannot tell us. Called from screenmgr on entry, so it
+ * runs once per visit rather than once per track. Both stay "-" when the scan never
+ * found them, which is the honest answer for a file with no date tag - and for any row
+ * indexed before the scanner learned to write these columns, which a rescan fixes. */
+void songinfo_refresh(void)
+{
+    if(!g_val[0] || !g_path[0]) return;
+    int year = 0, kbps = 0;
+    mdb_song_extra_by_path(g_path, &year, &kbps);
+    char b[24];
+    if(year > 0){ snprintf(b, sizeof b, "%d", year); lv_label_set_text(g_val[F_YEAR], b); }
+    else          lv_label_set_text(g_val[F_YEAR], "-");
+    if(kbps > 0){ snprintf(b, sizeof b, "%d kbps", kbps); lv_label_set_text(g_val[F_BITRATE], b); }
+    else          lv_label_set_text(g_val[F_BITRATE], "-");
 }
