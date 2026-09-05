@@ -1,8 +1,9 @@
 # diskOS UI dev workflow
 
 How to build, deploy, and iterate on the diskOS UI (`mq_ui`) on real hardware. For iterating on
-UI changes you do **not** need the installer or a reflash. Build, push over SSH, hot-reload. A reboot
-simply reverts to the flashed build, which is what you want while experimenting.
+UI changes you do **not** need the installer or a reflash. Build, push over SSH, hot-reload. By
+default a reboot reverts to the flashed build, which is what you want while experimenting; when a
+build is good, `--persist` (section 5) keeps it without a reflash.
 
 ## 1. Build the binary
 
@@ -82,10 +83,66 @@ fails safely (leaving the stock UI as a fallback) if your build never comes up.
 
 To go back to stock without a reboot, just `killall mq_ui` and let the watchdog respawn the stock UI.
 
-## 5. Make it permanent (optional)
+## 5. Make it permanent
 
-Hand-deployed binaries revert to the flashed build on reboot (S97 verifies `/usr/data/mq_ui` against
-the read-only manifest). To bake a build in permanently, flash it with the installer:
+By default a hand-deployed binary reverts on the next reboot: S97 verifies `/usr/data/mq_ui` against
+`/etc/diskos_manifest`, which is baked into the read-only rootfs at flash time, and quarantines
+anything that does not match. There are two ways to keep a build.
+
+### 5a. On-device update (seconds, one reboot)
+
+**One-time cost first.** S97 lives in the read-only rootfs, so a device flashed before this existed
+has an S97 that does not know about update slots and will ignore one. Getting the update path onto
+a device therefore takes exactly one more reflash (5b) - and then no more, for UI changes. Flash the
+newest `mq_ui` at the same time so that reflash is not wasted. `--persist` refuses to run against an
+older S97 rather than arming a slot that would silently do nothing.
+
+Turn on **Settings -> System -> On-Device Updates** on the device, once. Then:
+
+```sh
+DISKOS_IP=<device-ip> DISKOS_PW=<debug-password> tools/diskos-deploy.sh --persist ui/mq_ui
+```
+
+That does a normal deploy and then arms an update slot. On the next boot S97 adopts the binary and
+records its hash, so every boot after that verifies against the adopted hash and runs your build.
+
+What the flag actually changes, in one line: without it S97 accepts **only** the binary the flasher
+blessed; with it S97 **also** accepts one whose SHA-256 matches a manifest sitting in `/usr/data`.
+Anyone who can write that manifest already has root on the device, so it grants no new capability to
+an attacker who is already there - but the rootfs stops being the sole root of trust, which is why
+it is a switch the user throws rather than a default. `diskos-deploy.sh` will not create the flag
+for you.
+
+Details worth knowing:
+
+- **The slot is written last**, after the binary has been confirmed running on the device. A build
+  that fails to start exits earlier and leaves no slot behind, so "permanent" is never granted to
+  something that has not run here at least once.
+- **The slot is one-shot.** S97 clears it whether it verifies or not, so a bad drop cannot make the
+  device retry it on every boot forever.
+- **The previous binary is kept** at `/usr/data/mq_ui.prev` (a rename, so it costs no flash). One
+  rollback deep; to use it, `mv` it back and reboot.
+- **Turning the setting off is not a trap.** The adopted binary stops verifying, so S97 quarantines
+  it and reinstalls the copy embedded in the rootfs at `/opt/diskos/mq_ui`. The device comes back on
+  the **flashed diskOS build**, not on stock.
+- **A reflash always wins.** The adopted manifest records which rootfs manifest it was adopted
+  against; a flash replaces that, so the adoption is dropped and the freshly flashed UI installs.
+  Without this, `/usr/data` surviving the flash would leave the old adopted binary in place, still
+  verifying, and a 90-minute reflash would silently give you back the build you already had.
+- **Shape is checked regardless.** A non-ELF or non-MIPS file is refused before anything is made
+  executable, whichever manifest blessed it. `--persist` also refuses a non-MIPS binary host-side,
+  because the native fast check writes x86-64 to the exact path the deploy script pushes.
+
+The whole mechanism is exercised by `python3 tests/s97check.py`, which runs the real S97 against a
+fake root - thirteen scenarios including a corrupt slot, a wrong-architecture slot, the flag being
+switched back off after an adoption, and a reflash landing on top of one. Run it after touching
+`payload/S97diskos_install`; the failure modes are otherwise only discoverable by rebooting a
+device, where each wrong answer costs another flash to undo.
+
+### 5b. Full reflash
+
+Needed when the change is not just the UI binary (rootfs, kernel hooks, the manifest itself), or to
+re-establish the flashed build as the baseline:
 
 ```sh
 python3 -m diskos_installer install --stock <stock_rootfs.squashfs> --ui path/to/mq_ui --variant public

@@ -243,6 +243,7 @@ cd ui && make fontcheck && ./fontcheck   # user-font path: LVGL VFS, icon fallba
 python3 tests/managercheck.py            # device reporting, restore-point lifecycle
 python3 tests/diagcheck.py               # redaction, run log, diagnostic report
 python3 tests/glyphcheck.py              # no UI string literal the device cannot draw
+python3 tests/s97check.py                # the boot installer, run for real against a fake root
 cd ui && make queuecheck && ./queuecheck  # LIST_SONG_0 queue writes: order + contiguity
 ```
 
@@ -263,12 +264,19 @@ cd ui && gcc -DSCANNER_TEST -DSCAN_ROOT='"/tmp/sd"' -DDB_PATH='"/tmp/song.db"' \
 `SCAN_ROOT` must be a real mountpoint (the scanner refuses to rebuild from an unmounted card) - a
 `tmpfs` works.
 
+`s97check` rewrites every absolute path in `payload/S97diskos_install` to a temp tree and runs the
+real script under `sh`, so it touches nothing outside that tree. Thirteen scenarios. Run it after
+ANY edit to S97: that script decides whether the device boots diskOS or stock, every wrong answer
+costs a reflash to undo, and it is otherwise untestable without rebooting hardware.
+
 ## Iterate on hardware
 
-Do not reflash to test a UI change. Enable Debug Mode on the device for SSH, then:
+Do not reflash to test a UI change. Enable Debug Mode on the device for SSH, then (IP and password
+come from the environment, not argv, so the password never reaches the process list):
 
 ```sh
-tools/diskos-deploy.sh <ip> <password>   # build, verify by md5, hot-reload, prune stock safely
+DISKOS_IP=<ip> DISKOS_PW=<pw> tools/diskos-deploy.sh ui/mq_ui   # verify by md5, hot-reload, prune stock
+DISKOS_IP=<ip> DISKOS_PW=<pw> tools/diskos-deploy.sh --persist ui/mq_ui   # ...and keep it across reboots
 tools/diskos-shot.sh                     # framebuffer to PNG
 tools/diskos-touch.sh                    # inject taps/swipes
 tools/diskos-probe.sh                    # one-trip hardware probe: LIST_SONG_0 shape, whether
@@ -276,8 +284,12 @@ tools/diskos-probe.sh                    # one-trip hardware probe: LIST_SONG_0 
                                          # rate. Read-only unless given --marker / --append.
 ```
 
-See `docs/DEV_WORKFLOW.md`. Hand-deployed binaries revert on reboot (S97 verifies `/usr/data/mq_ui`
-against a baked manifest), which makes this safe to experiment with.
+See `docs/DEV_WORKFLOW.md`. WITHOUT `--persist` a hand-deployed binary reverts on reboot (S97
+verifies `/usr/data/mq_ui` against the manifest baked into the read-only rootfs), which is what
+makes this safe to experiment with. `--persist` arms a one-shot update slot that S97 adopts on the
+next boot; it requires **Settings -> System -> On-Device Updates** to be on, and the deploy script
+will NOT create that flag for you - it is the user's consent to the rootfs no longer being the sole
+root of trust. Turning the setting back off reinstalls the FLASHED build, not stock.
 
 ## Recipes
 
@@ -366,6 +378,8 @@ cd ui && make fontcheck && ./fontcheck
 python3 tests/managercheck.py
 python3 tests/diagcheck.py
 python3 tests/glyphcheck.py
+python3 tests/s97check.py                # only if you touched payload/S97diskos_install
+cd ui && make queuecheck && ./queuecheck  # only if you touched the musicdb queue layer
 
 # 3. only if you touched scanner.c. SCAN_ROOT must be a REAL MOUNTPOINT (the scanner
 #    refuses to rebuild from an unmounted card): sudo mount -t tmpfs tmpfs /tmp/sd
@@ -400,6 +414,8 @@ own verdict.
 | What you see | What it actually is |
 |---|---|
 | Deployed a build and NOTHING changed; stock behaviour is back | You deployed an x86 binary. The device could not run it, `diskos-deploy.sh` correctly refused to prune, and `fiio_init`'s watchdog respawned the STOCK UI. Check with `file ui/mq_ui`. |
+| Deployed with `--persist`, rebooted, the OLD build is back | Read `/usr/data/diskos_install.log` - S97 says which of the three gates it hit. Either On-Device Updates is off (no `/usr/data/diskos_updates_enabled`), or the device's rootfs carries an S97 that predates update slots (`--persist` refuses in that case rather than pretending), or the slot failed its own SHA-256. The slot is one-shot, so it will be gone either way. |
+| The device booted the FLASHED build after you turned On-Device Updates off | Working as designed. The adopted binary no longer verifies, so S97 quarantines it and reinstalls `/opt/diskos/mq_ui` from the rootfs. Your build is at `/usr/data/mq_ui.rejected`; the one before the last adopt is at `/usr/data/mq_ui.prev`. |
 | Any link fails with `relocations in generic ELF` / `file in wrong format` | Stale objects from the OTHER architecture - `EM: 62` is x86-64 left by the native fast check, `EM: 8` is MIPS left by the Docker build. `cd ui && find . -name '*.o' -delete && rm -f mq_ui`, then rebuild. |
 | A black box where a character should be | No font we ship has that glyph. If it is our own string, make it ASCII (`tests/glyphcheck.py` finds them). If it is tag/network text, route it through `txt_fold_ascii()`. |
 | A scanner change had no effect | `song.db` is only rewritten by a rescan. Menu -> Scan on the device, or re-run the scanner harness. |
@@ -421,124 +437,82 @@ own verdict.
 
 ## State of this branch
 
-`claude/custom-os-fixes-wishlist-f5f002` - fixes and features from the r/snowsky beta review: theme
-system with light mode, user fonts, nav-stack fix, UI watchdog, wider audio-format support with a
-scan progress screen, artist->albums, settings categories, expanded Quick Settings, charge limit, USB
-connect handling, plus the installer's manager front end and diagnostics.
+`claude/custom-os-fixes-wishlist-f5f002` - fixes and features from the r/snowsky beta review, then
+a second pass driven by what the device actually did once it booted.
 
-**First real-hardware flash happened, and diskOS BOOTS** (device was stock V228 going in; a verified
-restore point is saved). Built via the Docker toolchain inside WSL2 (see above), flashed with
-`--variant public --ui <fresh build>` - a real `usbboot` write, F001 SUCCESS, ~91 minutes, 2 factory
-bad blocks correctly skipped. A plain power-on with no buttons held reaches diskOS, exactly as the
-Vol-Up rule above predicts. Home, Menu, library browsing and playback all work on hardware.
+**diskOS runs on real hardware.** The first flash went in over stock V2.28 (verified restore point
+saved): Docker toolchain inside WSL2, `--variant public --ui <fresh build>`, a real `usbboot` write,
+F001 SUCCESS, ~91 minutes, 2 factory bad blocks correctly skipped. A plain power-on with no buttons
+held reaches diskOS, exactly as the Vol-Up rule above predicts.
 
-Fixed from the first hardware session (all built + unit-tested; what has and has not been seen
-on hardware is spelled out after the list):
+### Confirmed working ON DEVICE
 
-- `ui/txtfold.c` (new): the Montserrat faces cover U+0020..U+007E and the Source Han CJK fallback
-  starts at U+3001, so **everything between - every curly apostrophe and every accented Latin
-  letter - had no glyph in any font we load** and drew LVGL's placeholder box ("Don<box>t Push Me",
-  and Bjork/Beyonce/Sigur Ros silently mangled the same way). Folded to ASCII on the way in
-  (`ipc.c` metadata, `musicdb.c` rows), never on a file path. Table verified against Unicode NFD.
-- `scanner.c`: now actually parses `ALBUM_ARTIST` (TPE2 / ALBUMARTIST / `aART`) and `DISC`/`TRACK`
-  (TRCK/TPOS, TRACKNUMBER/DISCNUMBER, and MP4's BINARY `trkn`/`disk` atoms). Parsers were refactored
-  to pass one `tags_t*` instead of four `char*` out-params. **Needs a RESCAN to take effect.**
-- `musicdb.c`: the Library now offers TWO artist axes, because neither answers the other's
-  question - `mdb_artists()` and friends take an `MDB_AR_TRACK` / `MDB_AR_ALBUM` axis and cache
-  per axis. **Artists** is the raw `ARTIST` tag (a guest stays findable under their own name);
-  **Album Artists** is `ALBUM_ARTIST`, else `ARTIST` with a "feat." tail stripped - including
-  the BRACKETED forms, "50 Cent (feat. Eminem)" and "50 Cent [ft. Nate Dogg]", which is how
-  most taggers actually write it and which the first attempt missed entirely.
-  `mdb_album_songs()` returns DISC/TRACK order replicating the player's own `ORDER_ALBUM`
-  exactly (they MUST agree - a tap is sent as a position in the player's list).
-- **Undrawable literals in our OWN strings**, which had nothing to do with anybody's tags:
-  "Turning on Wi-Fi<box>", "Charging <box> still playing", "Scan failed <box> library kept",
-  the scan-progress label (which was ONLY an ellipsis), and "Album <box> 3/19" permanently on
-  Now Playing. 17 escapes replaced with ASCII. Weather text now folds too - `wttr.in` sends a
-  real degree sign. `tests/glyphcheck.py` is new and fails on any UI literal outside what we
-  can draw; it was verified to fail on a planted literal before being trusted.
-- `apps.c`: the Menu grid was 2.13 rows tall so a scroll always rested mid-row, AND its bottom edge
-  sat at y=326 where the round screen gives only 210px of chord against a 266px row - the bottom row
-  was clipped by the bezel. Now exactly two rows ending at y=296, with `LV_SCROLL_SNAP_START`.
-- `library.c`: per-view scroll memory, restored on BACK only (forward drills still start at top).
-- `library.c`: two follow-up bugs from the two-axis split, BOTH of which made a list look empty
-  instead of failing - worth knowing because the shape recurs:
-  - `add_row()` decides what a row CONTAINS with a `switch(g_view)`, and the new
-    `VIEW_ALBUM_ARTISTS` was added to every place that builds and routes the view but not to
-    the one that draws it. That switch has no `default:` and `add_row()` creates the row object
-    BEFORE it, so the miss neither crashed nor warned: the view queried correctly and rendered
-    the right NUMBER of completely blank rows. On device that reads as "the list is empty and a
-    rescan does not help", which sends you to the database - the one place the bug was not.
-    (`mdb_artists()` cannot return zero for a non-empty library: the album axis falls back to
-    `ARTIST` and the scanner guarantees at least "Unknown artist". A real data miss shows the
-    words "No artists found" instead. That is how you tell the two apart.)
-  - `library_open_artist()` (Now Playing -> 3-dot -> Artist) never set `g_ar_axis`, so it
-    inherited whichever axis was last browsed. `npmenus` hands it the raw `ARTIST` column, so
-    resolving it on the ALBUM axis matched nothing and gave "No songs by this artist". A
-    deep-link must set every piece of context it depends on.
-- `main.c`: volume keys are read straight off the GPB pin (bit 13/14), so the volume bar paints on
-  the key edge instead of waiting for the player's a714 - the player grabs `event0` exclusively and
-  sits on a single press watching for a double-press track skip. **Confirmed faster on device.**
-- `ipc.c`/`main.c`: physical power-key activity is reported by `mq_player` as `aa1c`; diskOS now
-  consumes that event to wake the dimmed/off backlight and leave the saver. The payload semantics
-  for press/release/long-press remain stock-player behavior, so this is a wake notification only.
-  Built and pushed as commit `b02da75`; hardware confirmation of the direct power-button wake is
-  still pending.
-- `queue.c` (uncommitted): the Now Playing queue screen reconstructs all-songs, artist, album,
-  genre, playlist and favourites scopes from `musicdb.c`, displays 1-based positions, and jumps
-  with the same list type, name and position. Targetless group-play can use its pending scope once
-  the player rebuild completes. The backing storage grows to the actual song count; do not restore
-  the old fixed 4096-entry limit. The queue work is not yet committed or hardware-tested.
-- Warning cleanup (uncommitted): compiler warning fixes cover misleading indentation, nested
-  comments, unused helpers, format truncation, and bounded copies in app/path/weather/session-key
-  handling. The latest Docker build produced a warning-free MIPS binary; verify architecture with
-  `file ui/mq_ui` before deployment. The weather Menu tile now uses a cloud/sun icon instead of
-  the old eye icon.
-- `ipc.c`: ignore a `song_duration_time` of 0 for the track already playing (the 0102 mode-change
-  reply re-announces the song with a partial body, snapping the NP ring to the start for a frame).
-  Hypothesis-driven - not yet confirmed against a captured a2 frame.
+Reported by the user after deploying the queue build, so treat these as tested rather than merely
+built. The whole fix set was reported as a block ("all seems to work"), not item by item, so any
+single one is likely-good rather than individually proven.
 
-**What has actually been seen on hardware**, as distinct from built-and-tested:
+- Volume keys read straight off the GPB pin (bit 13/14) - **confirmed faster**, separately from the
+  block report. The player grabs `event0` exclusively and sits on a press watching for a
+  double-press skip, so waiting for its `a714` was the lag.
+- Apostrophes and accented names (`txtfold.c`), album track order, artist grouping including the
+  bracketed "Artist (feat. Guest)" forms, the Menu grid layout, per-view scroll memory.
+- **The queue** - add to queue, play next, queue a whole album/artist/genre, reorder, remove.
+- **Gapless** - user-confirmed. `0647` does what the setting says.
+- `LIST_SONG_0` is the player's live queue and **the player re-reads it as it advances** - this is
+  the probe result the whole queue design rests on (`docs/QUEUE_DESIGN.md`, Route B).
 
-- The volume fix is confirmed faster on device.
-- A build carrying the two-axis Artists reached the device and ran - the "Album Artists" row
-  appeared in the Library menu - so the deploy path works and this change set has executed on
-  hardware. On that build the list itself rendered blank (the `add_row` bug above).
-- Reported on that same build and NOT yet re-tested since the later commits: an apostrophe still
-  drawing as a box, album tracks still alphabetical, and "feat." variants still splitting the
-  artist list. Each has a CANDIDATE cause that was fixed afterwards - respectively the
-  undrawable literals in our OWN strings, `DISC`/`TRACK` needing a rescan to populate, and
-  `strip_featuring()` not handling the bracketed "Artist (feat. Guest)" form. Those are
-  hypotheses, not diagnoses: none was reproduced against that exact build, and none of the
-  fixes has been on hardware yet. Re-test before assuming any of the three is closed.
-- Never yet exercised on device: theme switching, a library rescan, the menu-grid layout, the
-  scroll memory, the Now Playing progress-flash fix, the new power-key wake path, or the queue.
+### Built and tested, NOT yet seen on hardware
 
-The honest summary: the deploy path is proven, the volume fix is proven, and the power-key wake
-path is built and pushed but needs hardware confirmation. Library ordering fixes still require one
-deploy-plus-rescan pass; a C418 Minecraft Volume Alpha report is currently undiagnosed and may be
-album metadata/database ordering rather than Sequential mode.
+- The power-key wake path (`b02da75`): `mq_player` reports physical power-key activity as `aa1c`,
+  and `ipc.c`/`main.c` now wake the dimmed/off backlight from it.
+- The Now Playing progress-flash fix - `ipc.c` ignores a `song_duration_time` of 0 for the track
+  already playing. Hypothesis-driven; never confirmed against a captured `a2` frame.
+- Theme switching, a library rescan, Wi-Fi auto-off, the on-device update path (below).
 
-Known gaps worth doing next, in rough order: the scanner still never writes `DURATION`, year or
-bitrate, and binds `ADD_TIME` to a hardcoded constant; there is no on-device update path (every
-PERMANENT UI change is a 60-90 min reflash - `tools/diskos-deploy.sh` covers testing, but S97 reverts
-a hand-deployed binary on the next boot); no folder browser. **There is a queue VIEW but no way to
-QUEUE anything** - `queue.c` is a read-only mirror of the list the player already built, with
-tap-to-jump. Add-to-queue / play-next / reorder do not exist; `docs/QUEUE_DESIGN.md` specs them and
-the probe that decides which of three routes to take. Do not start that work before the probe. `mq_player` embeds a working AirPlay stack that only
-needs its trigger tag pinned - `docs/RE_CATALOGUE.md` names the exact next step.
+### The on-device update path (newest work)
 
-Runtime text that is still NOT folded, and will still show boxes if it contains anything outside
-ASCII: Wi-Fi SSIDs (`wifi.c`), Bluetooth device names (`bt.c`), fetched lyrics (`lyrics.c`),
-filenames shown during a scan (`scanview.c`), and homebrew app names from `app.conf` (`apps.c`).
-Each is a one-line `txt_fold_ascii()` call at the point the name is displayed.
+`tools/diskos-deploy.sh --persist` now arms a one-shot update slot in `/usr/data`; S97 adopts it on
+the next boot, records the SHA-256 in `/usr/data/diskos_adopted_manifest`, and verifies against that
+from then on. Gated behind **Settings -> System -> On-Device Updates**, off by default, because it
+means the rootfs stops being the sole root of trust.
 
-One inherent limit: "play all by artist" sends the player `list_type 2` + a name, and the player
-filters `WHERE ARTIST=?`. An album-artist-grouped row therefore queues fewer tracks than the UI
-lists. Tapping an individual track is fine - `on_song_play` already falls back to the all-songs
-scope when the player's exact list does not contain the song. We cannot change the player's filter
-column, so this is structural. If Album Artists shows the correct names but Play All omits tracks,
-do not change the album-artist grouping or invent an IPC tag: this is the stock player's filter
-contract, not a database reload failure. The earlier blank Album Artists rows were a UI switch
-omission and were fixed in `6f6bf9c`; a genuine data miss says "No artists found" rather than
-showing blank rows.
+The fail-closed contract is intact in both directions: shape (ELF32-LE / MIPS) is checked whatever
+blessed the binary, the slot is one-shot so a corrupt drop cannot loop forever, the outgoing binary
+is kept at `/usr/data/mq_ui.prev`, turning the setting off reinstalls the FLASHED build rather than
+dropping to stock, and a reflash always beats a standing adoption. `python3 tests/s97check.py` runs
+the real S97 against a fake root across thirteen scenarios.
+
+**It costs one more reflash to adopt.** S97 lives in the read-only rootfs, so a device flashed
+before this existed has an S97 that ignores update slots entirely. Flash once more with the newest
+`mq_ui`, and UI changes stop needing a flash after that. `--persist` detects an older S97 and
+refuses rather than arming a slot nothing will read.
+
+### Known gaps, in rough order
+
+- **Physical key semantics** [device]. `0820`/`0821`/`0822` (key single / double / long action) are
+  string-verified but never used, so the meaning of every press is still stock-player behaviour we
+  do not control. Highest-value RE left - see `docs/ROADMAP.md` Tier 0.
+- Scanner still never writes year or bitrate. `DURATION` (`00192f0`) and `ADD_TIME` (`70fd409`) are
+  done.
+- No folder browser. `0408` = file/folder browse is string-verified; probe before building.
+- AirPlay: `mq_player` embeds a working stack that only needs its trigger tag pinned.
+  `docs/RE_CATALOGUE.md` names the exact next step.
+- `MEMORY_PLAY.POSITION` is never updated during playback (probe-confirmed), so resume-to-exact-
+  position may not work at all.
+
+### Two traps that keep catching people
+
+**"Play all by artist" is structurally limited.** It sends the player `list_type 2` + a name and the
+player filters `WHERE ARTIST=?`, so an album-artist-grouped row queues fewer tracks than the UI
+lists. We cannot change the player's filter column. Tapping an individual track is fine -
+`on_song_play` falls back to the all-songs scope when the player's list does not contain it - and
+*Add to queue* on an artist row already builds the exact list via `mdb_queue_append_ids()`. Switching
+the tap over is one device test away (`docs/ROADMAP.md` Tier 2) and deliberately not done yet: it
+would replace `LIST_SONG_0` wholesale under a bare position jump, and we have only verified the
+player re-reads the table as it ADVANCES. If Album Artists shows the right names but Play All omits
+tracks, this is the cause - do not change the grouping and do not invent an IPC tag.
+
+**A blank list is a UI bug, not a data bug.** `add_row()`'s `switch(g_view)` has no `default:` and
+creates the row object BEFORE it, so a missing case renders the right NUMBER of completely blank
+rows. That is how Album Artists shipped broken (fixed in `6f6bf9c`). A genuine data miss says
+"No artists found" instead. That is how you tell them apart.

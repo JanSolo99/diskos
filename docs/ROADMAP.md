@@ -90,10 +90,22 @@ music.
 
 ## Tier 4 - iteration speed (this gates everything above)
 
-- [ ] **On-device update path** [device]. Every *permanent* UI change is a 60-90 minute reflash.
-  `tools/diskos-deploy.sh` covers testing, but S97 reverts a hand-deployed binary on the next
-  boot. Until this exists, every item above pays a reflash tax to ship. **Arguably the highest
-  leverage item on this page** even though it is invisible to the user.
+- [x] **On-device update path** - built and host-tested; **one device reboot still needed to
+  confirm it**. `tools/diskos-deploy.sh --persist` arms an update slot in `/usr/data`; S97 adopts
+  it on the next boot, records its SHA-256 in an adopted manifest, and verifies against that from
+  then on. Off by default behind **Settings -> System -> On-Device Updates**, because it means the
+  rootfs is no longer the sole root of trust - see `docs/DEV_WORKFLOW.md` section 5a.
+  The fail-closed contract is intact in both directions: shape (ELF32-LE/MIPS) is checked whatever
+  blessed the binary, the slot is one-shot, the previous binary is kept at `/usr/data/mq_ui.prev`,
+  turning the setting back off reinstalls the FLASHED build rather than dropping to stock, and a
+  reflash always wins over a standing adoption (the adopted manifest records the rootfs it was
+  adopted against, so a flash invalidates it - otherwise `/usr/data` surviving the flash would hand
+  you back the build you already had).
+  `python3 tests/s97check.py` runs the real S97 against a fake root across thirteen scenarios.
+  **Costs one final reflash to adopt:** S97 is in the read-only rootfs, so the device has to be
+  flashed once with the new one (carrying the newest `mq_ui`) before `--persist` does anything.
+  `--persist` detects an older S97 and refuses rather than silently arming a slot nothing reads.
+  **Device check needed:** after that flash, push with `--persist`, reboot, confirm it comes back.
 
 ## Tier 5 - power
 
@@ -122,13 +134,11 @@ top of `docs/POWER_OPTIMIZATION_PLAN.md`.
 
 ## Suggested order
 
-1. **Tier 1 verification pass** - one deploy + rescan now closes a LOT at once: apostrophes,
-   album order, artist grouping, menu layout, scroll memory, track durations, and the whole
-   queue feature. This is the cheapest large step available.
-2. **Tier 4** (on-device updates) - it pays for itself immediately after that.
-3. **Tier 0** key semantics - the biggest felt-quality win, and one RE session.
+1. **Confirm the update path** - turn on On-Device Updates, deploy with `--persist`, reboot.
+   Everything below ships faster once that is proven, and it is a two-minute test.
+2. **Tier 0** key semantics - the biggest felt-quality win, and one RE session.
+3. **Tier 2 device pass** - queue while playing, reorder ahead of the playhead, reboot and resume.
 4. Tier 3 and the rest of Tier 5 as they earn it.
 
-**Host-side work remaining** (no device needed): "play all by artist"; *Add to queue* on
-album/artist rows; drag-to-reorder in the queue; scanner year/bitrate/`ADD_TIME`; Wi-Fi
-idle-off policy.
+**Host-side work remaining** (no device needed): scanner year and bitrate. Everything else on this
+page now needs hardware.
