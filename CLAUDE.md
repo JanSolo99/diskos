@@ -119,7 +119,14 @@ tools, and a real mask-ROM flash.
 cd ui && make fontcheck && ./fontcheck   # user-font path: LVGL VFS, icon fallback, cold boot
 python3 tests/managercheck.py            # device reporting, restore-point lifecycle
 python3 tests/diagcheck.py               # redaction, run log, diagnostic report
+python3 tests/glyphcheck.py              # no UI string literal the device cannot draw
 ```
+
+`fontcheck` needs a real `.ttf` in `ui/tests/sdcard/Fonts/` and a WRITABLE `/usr/data`
+(it exercises the font cache); both missing on a fresh WSL box, and both look like code
+failures when they are not. `diagcheck` currently fails one redaction case on any account
+whose home is literally `/home/<username>` - `diag.redact()` collapses the home path to
+`~` before the `<user>` rule can fire, so that test is only green for root. Pre-existing.
 
 Scanner harness (tag parsers against real byte layouts):
 
