@@ -104,6 +104,10 @@ int  mdb_split_artists(const char *raw, char toks[][MDB_STR], int cap);
  *
  * All return 1 on success, 0 on failure. */
 int  mdb_queue_count(void);                 /* rows currently in the queue */
+/* Read the queue itself, in play order. `id` is the LIST_SONG_0.ID, which is also
+ * the 1-based position the player addresses. This reads the REAL table rather than
+ * reconstructing a scope, so it cannot disagree with what will actually play. */
+int  mdb_queue_rows(mdb_song_t *out, int cap);
 int  mdb_queue_playing_id(void);            /* LIST_SONG_0.ID of the playing row, 0 if unknown */
 int  mdb_queue_append(const char *path);    /* add to the end */
 int  mdb_queue_insert_after(int after_id, const char *path);  /* "play next" when given the playing row */

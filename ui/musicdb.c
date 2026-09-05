@@ -720,6 +720,28 @@ int mdb_unfavorite(int id){
  * counterpart for them, so they take their defaults rather than being invented here. */
 #define Q_COLS "PATH,NAME,TITLE,ALBUM,ARTIST,GENRE,DISC,TRACK,IS_CUE,IS_ISO,OFFSET,DURATION,ADD_TIME,IS_SELECT,ALBUM_ARTIST"
 
+int mdb_queue_rows(mdb_song_t *out, int cap){
+    if(!out || cap <= 0) return 0;
+    sqlite3 *d = db(); if(!d) return 0;
+    sqlite3_stmt *st;
+    const char *sql = "SELECT ID,IFNULL(TITLE,IFNULL(NAME,'Untitled')),IFNULL(ARTIST,''),"
+                      "IFNULL(ALBUM,''),IFNULL(DURATION,0) FROM LIST_SONG_0 ORDER BY ID;";
+    if(sqlite3_prepare_v2(d, sql, -1, &st, NULL) != SQLITE_OK) return 0;
+    int n = 0;
+    while(n < cap && sqlite3_step(st) == SQLITE_ROW){
+        mdb_song_t *s = &out[n++];
+        s->id = sqlite3_column_int(st, 0);
+        snprintf(s->title,  MDB_STR, "%s", colt(st, 1));
+        snprintf(s->artist, MDB_STR, "%s", colt(st, 2));
+        snprintf(s->album,  MDB_STR, "%s", colt(st, 3));
+        s->dur_ms = sqlite3_column_int(st, 4);
+        s->genre[0] = 0; s->album_artist[0] = 0; s->disc = s->track = 0;
+        song_norm(s);
+    }
+    sqlite3_finalize(st);
+    return n;
+}
+
 int mdb_queue_count(void){
     sqlite3 *d = db(); if(!d) return 0;
     sqlite3_stmt *st; int n = 0;

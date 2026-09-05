@@ -737,6 +737,36 @@ static void scanner_poll(lv_timer_t *t){
  * change the contents of a list the player may have loaded (playlist add/remove,
  * playlist delete, favourite toggle/remove). */
 void ui_invalidate_play_scope(void){ g_play_scope[0] = '\0'; g_play_pendscope[0] = '\0'; }
+
+/* ---- queue ownership -------------------------------------------------------
+ * Once the user edits the queue, LIST_SONG_0 no longer corresponds to ANY library
+ * scope - it is their list. The scope cache must reflect that, because a matching
+ * scope is exactly what lets ui_play_list() take the no-rebuild jump path. Mark it
+ * with a sentinel no real scope can collide with (a real one is "<int>:<name>").
+ *
+ * The rule this buys: while the queue is user-owned, a tap that would REBUILD the
+ * list is the only thing that can destroy it, and that only happens when the user
+ * explicitly plays something new - which is the one time destroying it is correct. */
+#define Q_SCOPE "Q:"
+void ui_queue_take_ownership(void){
+    snprintf(g_play_scope, sizeof g_play_scope, "%s", Q_SCOPE);
+    g_play_pendscope[0] = '\0';
+    g_play_dirty = 0;
+}
+int ui_queue_owns_list(void){ return strcmp(g_play_scope, Q_SCOPE) == 0; }
+
+/* Jump within the user's queue: position only, never a rebuild. Refuses if the
+ * queue does not own the list, so a stale caller cannot send a bare position
+ * jump against a library scope it has not verified. */
+int ui_queue_play_pos(int pos1){
+    if(!ui_queue_owns_list()) return -1;
+    if(pos1 < 1) pos1 = 1;
+    char f[32];
+    snprintf(f, sizeof f, "0100%04X%04X0000", 16, (pos1 - 1) & 0xFFFF);
+    int rc = ipc_send_cmd(f);
+    fprintf(stderr, "queue jump pos=%d -> %s (rc=%d)\n", pos1, f, rc); fflush(stderr);
+    return rc;
+}
 /* set absolute volume 0..120 via the decoded 0715 command (class-2:
  * 0715 + LEN(000C) + <level 4hex>).  The player maps this through the same
  * cs43131 gain path as the hardware vol keys. */
@@ -1123,6 +1153,7 @@ static lv_obj_t *ui_active_scroller(void){
         case SCR_PLVIEW:  return playlistview_scroller();
         case SCR_SEARCH:  return search_scroller();
         case SCR_APPS:    return apps_scroller();
+        case SCR_QUEUE:   return queue_scroller();   /* a long queue needs the crown too */
         default:          return NULL;
     }
 }

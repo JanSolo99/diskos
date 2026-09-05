@@ -101,7 +101,8 @@ void fontpick_open(void);
 lv_color_t ui_current_accent(void);
 /* queue screen (queue.c) */
 void queue_create(lv_obj_t *root);
-void queue_refresh(void);   /* re-aim at the current play scope + rebuild the track list */
+void queue_refresh(void);   /* re-read LIST_SONG_0 and rebuild the rows */
+lv_obj_t *queue_scroller(void);   /* for the rim-scroll gesture */
 /* Standard screen header: back-chevron (tucked out of the clipped top-left) + centred title, clear of
  * the chevron. Back taps call screen_back(). Returns the title label so screens with a DYNAMIC title
  * (e.g. Library retitling to Songs/Albums) can update it. Use on every detail/list screen for one
@@ -167,6 +168,17 @@ void ui_play_playlist(long pid, int pos);
 /* read the list currently built in the player's LIST_SONG_0 ("<type>:<name>");
  * falls back to all-songs (type 1, empty name) when nothing is loaded. */
 void ui_play_scope_get(int *list_type, char *name, int cap);
+/* ---- user-owned play queue (see docs/QUEUE_DESIGN.md) --------------------
+ * Editing LIST_SONG_0 makes it the user's list rather than a library scope.
+ * ui_queue_take_ownership() records that so nothing sends a rebuild over it;
+ * ui_queue_play_pos() is the position-only jump that plays within it. */
+void ui_queue_take_ownership(void);
+int  ui_queue_owns_list(void);          /* 1 while the queue owns LIST_SONG_0 */
+int  ui_queue_play_pos(int pos1);       /* jump within the queue; -1 if not owned */
+/* Add to the queue from anywhere. `path` is a SONG.PATH. Returns 1 on success.
+ * queue_add_next inserts after the playing track, queue_add_end appends. */
+int  ui_queue_add_next(const char *path);
+int  ui_queue_add_end(const char *path);
 /* swipe sensitivity (px of horizontal travel needed for a back-swipe); lower = more sensitive */
 void ui_set_swipe_thresh(int px);
 void ui_apply_swipe_thresh(int px);   /* live apply, no persist (for slider drag) */

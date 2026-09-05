@@ -145,10 +145,87 @@ static void row_two(lv_obj_t *r, const char *top, const char *sub, const char *r
 
 /* ---- callbacks ---------------------------------------------------------- */
 static void song_cb(lv_event_t *e){
-    if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
+    if(lv_event_get_code(e)!=LV_EVENT_SHORT_CLICKED) return;
     int id=(int)(uintptr_t)lv_event_get_user_data(e);
     if(g_song_cb) g_song_cb(id);
     screen_show(SCR_NOWPLAYING);
+}
+
+/* ---- long-press a song -> Play next / Add to queue -------------------------
+ * A tap plays the track. Holding it offers the two queue actions instead, which
+ * is where a DAP user expects to find them and costs no screen space. The same
+ * gesture already means "play this whole group" on album/artist rows, so the
+ * vocabulary is consistent: hold = "do something bigger with this row".
+ *
+ * Both actions resolve the song's PATH on demand rather than caching it - the
+ * row index is not stable across a reload, but the SONG id is. */
+static lv_obj_t *g_qsheet;
+static int       g_qsheet_id;
+
+static void qsheet_close(void){
+    if(g_qsheet){ lv_obj_del(g_qsheet); g_qsheet = NULL; }
+}
+static void qsheet_bg_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) qsheet_close(); }
+
+static void qsheet_do(int next){
+    char path[512];
+    if(!mdb_song_path(g_qsheet_id, path, sizeof path) || !path[0]){
+        ui_toast("Couldn't find that track");
+        qsheet_close();
+        return;
+    }
+    int ok = next ? ui_queue_add_next(path) : ui_queue_add_end(path);
+    ui_toast(ok ? (next ? "Playing next" : "Added to queue") : "Couldn't queue that");
+    qsheet_close();
+}
+static void qsheet_next_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) qsheet_do(1); }
+static void qsheet_end_cb (lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) qsheet_do(0); }
+
+static void qsheet_button(lv_obj_t *card, int y, const char *txt, lv_event_cb_t cb){
+    lv_obj_t *b = lv_button_create(card);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_pos(b, 20, y);
+    lv_obj_set_size(b, 200, 44);
+    lv_obj_set_style_radius(b, 12, 0);
+    lv_obj_set_style_bg_color(b, th_fill3(), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(b, th_card_press(), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_center(l);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
+    lv_obj_set_style_text_color(l, th_text(), 0);
+}
+
+static void song_hold_cb(lv_event_t *e){
+    if(lv_event_get_code(e)!=LV_EVENT_LONG_PRESSED) return;
+    if(g_qsheet) return;
+    g_qsheet_id = (int)(uintptr_t)lv_event_get_user_data(e);
+
+    /* full-screen scrim on the top layer so it covers the header too, and a tap
+     * anywhere outside dismisses - same shape as the favourites confirm */
+    g_qsheet = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(g_qsheet);
+    lv_obj_set_size(g_qsheet, 360, 360);
+    lv_obj_set_pos(g_qsheet, 0, 0);
+    lv_obj_set_style_bg_color(g_qsheet, th_scrim(), 0);
+    lv_obj_set_style_bg_opa(g_qsheet, th_scrim_opa(), 0);
+    lv_obj_clear_flag(g_qsheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_qsheet, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_qsheet, qsheet_bg_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *card = lv_obj_create(g_qsheet);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, 240, 124);
+    lv_obj_center(card);
+    lv_obj_set_style_radius(card, 20, 0);
+    lv_obj_set_style_bg_color(card, th_card(), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    qsheet_button(card, 14, "Play next",    qsheet_next_cb);
+    qsheet_button(card, 66, "Add to queue", qsheet_end_cb);
 }
 static void reload_async(void *p){ (void)p; library_reload(); }
 
@@ -339,7 +416,8 @@ static void add_row(int i){
     lv_obj_t *r = base_row();
     switch(g_view){
         case VIEW_SONGS: case VIEW_GROUP:
-            lv_obj_add_event_cb(r, song_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)g_buf[i]->id);
+            lv_obj_add_event_cb(r, song_cb,      LV_EVENT_SHORT_CLICKED, (void*)(uintptr_t)g_buf[i]->id);
+            lv_obj_add_event_cb(r, song_hold_cb, LV_EVENT_LONG_PRESSED,  (void*)(uintptr_t)g_buf[i]->id);
             fmt_dur(dur,sizeof dur,g_buf[i]->dur_ms);
             row_two(r, g_buf[i]->title[0]?g_buf[i]->title:"Untitled", g_buf[i]->artist, dur);
             break;
