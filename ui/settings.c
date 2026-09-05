@@ -120,6 +120,43 @@ void settings_seed_charge_protect(void){
 
 static void apply_open_colorpick(int v){ (void)v; colorpick_open(); }   /* seed sliders from cfg + open */
 static void apply_debug_mode(int v){ (void)v; debug_open(); }           /* Settings -> System -> Debug Mode */
+
+/* Settings -> System -> On-Device Updates.
+ *
+ * The switch IS the file. The boot installer (payload/S97diskos_install) runs at S97,
+ * long before anything can open our config database, so the only thing it can test is
+ * a path: with /usr/data/diskos_updates_enabled present it will ALSO accept a UI whose
+ * hash matches an adopted-update manifest, which is how a build pushed with
+ * "diskos-deploy.sh --persist" survives a reboot instead of being quarantined.
+ *
+ * This deliberately weakens the boot guarantee - off, the device runs only the binary
+ * the flasher blessed - which is exactly why it is a user-facing switch and not a
+ * default. Turning it back off is not a trap: S97 falls back to the copy embedded in
+ * the rootfs, so the device reverts to the FLASHED diskOS build on the next boot
+ * rather than dropping to the stock UI.
+ *
+ * No sync() here: /usr/data is sync-mounted ubifs, and a full filesystem sync on the
+ * LVGL thread is exactly the kind of stall that makes the screen unwakeable. */
+#define UPDATES_FLAG "/usr/data/diskos_updates_enabled"
+static void apply_updates(int v){
+    if(v){
+        FILE *f = fopen(UPDATES_FLAG, "w");
+        if(!f){ cfg_set_int("updates_on", 0); ui_toast("Could not enable updates"); return; }
+        fclose(f);
+        ui_toast("Pushed builds will now stick");
+    } else {
+        if(remove(UPDATES_FLAG) != 0 && errno != ENOENT){
+            cfg_set_int("updates_on", 1); ui_toast("Could not turn updates off"); return;
+        }
+        ui_toast("Only the flashed UI will run");
+    }
+}
+/* Boot: the FILE is the source of truth. A reflash rewrites the rootfs and can leave
+ * /usr/data in a state this screen never saw, so re-derive the stored value from what
+ * S97 will actually find rather than trusting the last thing we wrote. */
+void settings_seed_updates(void){
+    cfg_set_int("updates_on", access(UPDATES_FLAG, F_OK) == 0 ? 1 : 0);
+}
 static void apply_artcache(int v){ ui_set_prewarm_mode(v); }
 
 static void apply_swipe(int v){ ui_apply_swipe_thresh(v); }   /* live; persisted on slider release */
@@ -262,6 +299,7 @@ void settings_apply_startup(void){
     cfg_set_int("font_size_idx", theme_font_scale() + 2);
     settings_seed_charge_protect();      /* show what the device is really doing */
     settings_reassert_charge_protect();  /* the player may have overwritten our intent */
+    settings_seed_updates();             /* the flag file, not our config, is the truth */
     apply_brightness(cfg_get_int("brightness", 16));
     cfg_set_int("sleep_idx", 0);   /* never auto-arm a sleep timer across reboots */
     apply_boot_default(cfg_get_int("boot_default", 0));  /* keep the boot-hook flag in sync */
@@ -417,6 +455,11 @@ static const setting_t TABLE[] = {
       "Import .m3u / .m3u8 playlists found on the SD card.", NULL },
     { "System",   "Default UI",  ST_CYCLER, "boot_default", 0,0,0, OPT_BOOTDEF, 2, NULL, apply_boot_default, 0,
       "Which UI boots by default. Hold Vol-Up at power-on to boot the other one.", NULL },
+    { "System",   "On-Device Updates", ST_TOGGLE, "updates_on", 0,1,1, NULL, 0, NULL, apply_updates, 0,
+      "Let diskOS install a UI update at boot instead of a full reflash. Off is the "
+      "strongest setting: only the UI that was flashed can run. On also accepts a build "
+      "you pushed yourself with diskos-deploy.sh --persist, checked by SHA-256 either "
+      "way. Turning it off restores the flashed UI on the next boot.", NULL },
     { "System",   "Restart",     ST_ACTION, NULL, 0,0,0, NULL,0, "Restart", apply_restart, 0,
       "Restart the device. Boots your default UI; hold Vol-Up for the other one.", NULL },
     { "System",   "Debug Mode",  ST_ACTION, NULL, 0,0,0, NULL,0, LV_SYMBOL_RIGHT, apply_debug_mode, 0,

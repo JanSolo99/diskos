@@ -93,6 +93,7 @@ void scanview_set_visible(int on);   /* screen manager: poll only while it is on
 void settings_apply_startup(void);
 void settings_reassert_charge_protect(void);  /* boot: push the stored intent back into SYSCONFIG */
 void settings_seed_charge_protect(void);      /* first run: adopt the device's current value */
+void settings_seed_updates(void);             /* boot: sync the On-Device Updates row to its flag file */
 /* font picker (fontpick.c) */
 void fontpick_create(lv_obj_t *root);
 void fontpick_open(void);

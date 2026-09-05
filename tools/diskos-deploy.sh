@@ -1,22 +1,50 @@
 #!/usr/bin/env bash
 # diskos-deploy.sh - push a locally built mq_ui to the device and hot-reload it, safely.
 #
-# This is for iterating on UI changes. A hand-deployed binary reverts to the flashed build on the
-# next reboot (that is intentional). To bake a build in permanently, flash it with the installer.
+# This is for iterating on UI changes. By default a hand-deployed binary reverts to the flashed
+# build on the next reboot - that is S97's fail-closed contract, and it is what makes this safe to
+# experiment with. Pass --persist to ALSO leave the build in the on-device update slot, so S97
+# adopts it on the next boot and the change survives without a 60-90 minute reflash.
 #
 # Usage:
-#   DISKOS_IP=<device-ip> DISKOS_PW=<debug-mode-password> ./diskos-deploy.sh [path/to/mq_ui]
+#   DISKOS_IP=<device-ip> DISKOS_PW=<debug-mode-password> ./diskos-deploy.sh [--persist] [path/to/mq_ui]
 #
 # Get the IP and a one-time SSH password from Debug Mode on the device (Settings > System). The
 # password is regenerated on every enable and does not survive a reboot.
 #
-# Requires: sshpass, ssh, scp, md5sum. Default binary path: ./mq_ui
+# --persist requires On-Device Updates to be ON (Settings > System) - the flag file it checks for is
+# the user's consent to a weaker boot guarantee, so this tool will not create it for you.
+#
+# Requires: sshpass, ssh, scp, md5sum, sha256sum. Default binary path: ./mq_ui
 set -eu
 
 IP="${DISKOS_IP:?set DISKOS_IP to the device IP (shown in Debug Mode)}"
 export SSHPASS="${DISKOS_PW:?set DISKOS_PW to the Debug Mode SSH password}"
-BIN="${1:-mq_ui}"
+
+PERSIST=0
+BIN=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --persist) PERSIST=1 ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; exit 1 ;;
+    *)  BIN="$1" ;;
+  esac
+  shift
+done
+BIN="${BIN:-mq_ui}"
 [ -f "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 1; }
+
+# Refuse to persist an obviously wrong binary. The device would refuse it too (S97 checks the ELF
+# header), but finding that out means a reboot, and the failure reads as "my update did nothing".
+if [ "$PERSIST" = 1 ] && command -v file >/dev/null 2>&1; then
+  case "$(file -b "$BIN")" in
+    *MIPS*) ;;
+    *) echo "refusing --persist: $BIN is not a MIPS binary ($(file -b "$BIN"))" >&2
+       echo "   the native fast-check writes x86-64 to this exact path - rebuild with Docker" >&2
+       exit 1 ;;
+  esac
+fi
 
 # password via SSHPASS (sshpass -e), not the command line, so it is not visible in the process list
 SSH=(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8)
@@ -81,3 +109,57 @@ else
   echo ">> deployed: /usr/data/mq_ui running, but mq_player is NOT running (check the device)" >&2
 fi
 REMOTE
+
+# 3. --persist: fill the on-device update slot so S97 adopts this build on the next boot.
+#
+# Deliberately LAST. The slot is only written after the binary has been confirmed running on the
+# device, so "permanent" is never granted to something that has not started at least once here.
+# A build that fails to come up exits above and leaves no slot behind.
+#
+# The slot is filled by copying /usr/data/mq_ui on the DEVICE rather than re-uploading: those bytes
+# were just md5-verified end to end and are the ones actually running, so the copy is both cheaper
+# and a stronger guarantee than a second transfer would be. The sha256 written alongside it is
+# computed HERE, on the host, from the source file - a device-side hash of the device-side copy
+# would be tautological and could not catch a corrupt copy.
+if [ "$PERSIST" = 1 ]; then
+  SHA="$(sha256sum "$BIN" | cut -d' ' -f1)"
+  echo ">> persisting: sha256=$SHA"
+  "${SSH[@]}" "root@$IP" "sh -s $SHA" <<'REMOTE'
+SHA="$1"
+# The boot installer lives in the READ-ONLY rootfs, so a device flashed before the update path
+# existed simply ignores the slot - the deploy would look like it worked and then silently revert.
+# Check the S97 that will actually run, not the one in the repo.
+S97=/etc/init.d/S97diskos_install
+if [ ! -f "$S97" ] || ! grep -q diskos_updates_enabled "$S97" 2>/dev/null; then
+  echo "ERROR: the boot installer on this device predates the on-device update path." >&2
+  echo "       It would ignore the update slot, so --persist would silently do nothing." >&2
+  echo "       This needs ONE more reflash to install the new S97; after that, never again." >&2
+  echo "       (The build you just pushed is running now; it will revert on the next reboot.)" >&2
+  exit 1
+fi
+if [ ! -f /usr/data/diskos_updates_enabled ]; then
+  echo "ERROR: On-Device Updates is OFF on this device." >&2
+  echo "       Turn it on in Settings > System > On-Device Updates, then re-run with --persist." >&2
+  echo "       (The build you just pushed is running now; it will revert on the next reboot.)" >&2
+  exit 1
+fi
+D=/usr/data/diskos_update
+rm -rf "$D" && mkdir -p "$D" || { echo "ERROR: could not create $D" >&2; exit 1; }
+# Stage under a dot-name and rename in, so S97 can never see a half-written slot: it requires BOTH
+# mq_ui and mq_ui.sha256, and the sha file is the LAST thing written.
+cp -f /usr/data/mq_ui "$D/.mq_ui.part" || { echo "ERROR: could not stage the slot copy" >&2; rm -rf "$D"; exit 1; }
+GOT="$(sha256sum "$D/.mq_ui.part" | cut -d' ' -f1)"
+if [ "$GOT" != "$SHA" ]; then
+  echo "ERROR: slot copy hashes $GOT, expected $SHA - discarding" >&2
+  rm -rf "$D"
+  exit 1
+fi
+mv -f "$D/.mq_ui.part" "$D/mq_ui" || { echo "ERROR: could not publish the slot" >&2; rm -rf "$D"; exit 1; }
+printf '%s  mq_ui\n' "$SHA" > "$D/mq_ui.sha256" || { echo "ERROR: could not write the slot sha" >&2; rm -rf "$D"; exit 1; }
+sync 2>/dev/null
+echo ">> update slot armed - S97 will adopt this build on the next boot"
+echo "   (previous binary will be kept at /usr/data/mq_ui.prev)"
+REMOTE
+else
+  echo ">> note: this build reverts on the next reboot. Re-run with --persist to keep it."
+fi
