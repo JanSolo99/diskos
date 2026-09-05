@@ -11,6 +11,9 @@
 #                           whether the kernel already wakes the CPU at HZ regardless
 #                           of what the UI loop does. If it does, cutting the loop's
 #                           30ms floor buys little and the effort belongs elsewhere.
+#   docs/ROADMAP.md Tier 5  whether SONG(PATH) is indexed. The table is the stock
+#                           player's, so our own schema says nothing about it, and the
+#                           scanner does one WHERE PATH=? per file - section 3b.
 #
 # Usage:
 #   DISKOS_IP=<ip> DISKOS_PW=<debug-mode-password> ./diskos-probe.sh            # read-only
@@ -172,6 +175,24 @@ echo "     likely key; both are tested here rather than assumed:"
 q "SELECT 'via ID:     ID='||l.ID||'  TRACK='||IFNULL(l.TRACK,'-')||'  TITLE='||IFNULL(l.TITLE,'-') FROM LIST_SONG_0 l JOIN MEMORY_PLAY m ON m.MUSIC_ID=l.ID;"
 q "SELECT 'via POS_ID: POS_ID='||IFNULL(l.POS_ID,'NULL')||'  TITLE='||IFNULL(l.TITLE,'-') FROM LIST_SONG_0 l JOIN MEMORY_PLAY m ON m.MUSIC_ID=l.POS_ID;"
 echo "  (whichever prints a row is the join the player actually uses)"
+echo
+echo "--- 3b. is SONG(PATH) indexed? (read-only) ----------------------------"
+# Nothing in OUR SQL creates an index on PATH, but song.db was built by the stock
+# player and our CREATE TABLE IF NOT EXISTS is a no-op against it - so what indexes
+# exist is the stock schema's choice and cannot be read off our source. It matters:
+# the scanner does one "WHERE PATH=?" UPDATE per file, so without an index a rescan
+# is roughly O(N^2) in library size. EXPLAIN QUERY PLAN is the decisive line - SCAN
+# means no index is being used, SEARCH ... USING INDEX means there is one.
+echo "indexes on SONG:"
+q "PRAGMA index_list(SONG);"
+echo "  (empty above = no index at all on this table)"
+echo
+echo "plan for the scanner's per-file lookup:"
+q "EXPLAIN QUERY PLAN SELECT ID FROM SONG WHERE PATH='probe';"
+echo "  -> 'SCAN SONG'                 = full table scan per file; a rescan is O(N^2)"
+echo "  -> 'SEARCH SONG USING INDEX'   = already indexed, nothing to do"
+echo
+echo "library size (the multiplier on the above): $(q 'SELECT COUNT(*) FROM SONG;') rows"
 echo
 echo "PLAY_LIST (the queue registry):"
 q "SELECT * FROM PLAY_LIST;"

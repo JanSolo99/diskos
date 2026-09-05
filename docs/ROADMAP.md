@@ -42,8 +42,13 @@ These are the operations you touch every minute. Everything else is secondary to
   the ID3 TLEN frame. Track lengths in the Library had been blank since the scanner was written.
 - [x] **Scanner: `ADD_TIME`** - `70fd409`. Now the file mtime, from the stat the walk already
   does. Every row used to share one hardcoded constant, so "Recently Added" sorted by nothing.
-- [ ] **Scanner: year and bitrate** [host]. Still unwritten. Lower value than the rest - nothing
-  in the UI displays either yet.
+- [x] **Scanner: year and bitrate** - year from ID3 TDRC/TYER/TDRL, ID3v1's fixed 4-byte field,
+  Vorbis DATE/YEAR, MP4 `(C)day` and APEv2 Year, dug out of whatever shape the tag is in
+  ("1998", "1998-05-12T00:00:00Z", "12/05/1998"). Bitrate is the AVERAGE, from file size and
+  duration - there is no cheap exact answer, and size*8/duration is what a player shows for VBR
+  anyway. Both appear in Song Info, looked up from song.db on screen entry: the player reports
+  neither, and neither belongs on the per-frame or per-track path for two rows nobody sees until
+  they open that screen. **Needs a rescan** like every scanner change.
 - [x] **`diagcheck` redaction bug** - `6ac38b6`. The implementation was right and the test was
   wrong; it only ever passed for root. Now asserts the property (no username survives) rather
   than which of the two rules happened to fire.
@@ -119,6 +124,16 @@ top of `docs/POWER_OPTIMIZATION_PLAN.md`.
   UNMEASURED: the benefit is inferred from the radio being a real draw, not from a battery test.
 - [x] **Stop rendering to a dark panel** - done: `ui_screen_is_off()` now gates the 10s clock
   push and the 1 Hz analog-saver hands, matching how `ui_vinyl_spin` was already gated.
+- [ ] **Check whether `SONG(PATH)` is indexed on device** [device first]. Nothing in OUR SQL creates
+  one, and every `WHERE PATH=?` we issue would be a full table scan without it - including the
+  scanner's per-file merge (`UPD_SONG`), which would make a rescan roughly O(N^2) in library size.
+  But our `CREATE TABLE IF NOT EXISTS` is a no-op on a real device: `song.db` and its table were
+  built by the stock player, so whatever indexes exist are ITS choice and are not visible from the
+  source. Settle it before writing anything: `tools/diskos-probe.sh` section 3b runs
+  `PRAGMA index_list(SONG)` plus an `EXPLAIN QUERY PLAN`, which says SCAN or SEARCH outright.
+  If there is genuinely no index, a `CREATE INDEX IF NOT EXISTS` in the scanner's schema setup is
+  the whole fix and is probably the largest easy speedup left; if there is one, this costs nothing
+  to have asked.
 - [ ] ~~Main loop 30ms floor~~ **DEPRIORITISED.** Measured: `mq_ui` idles at ~0.5% of one core.
   The wakeups are real but the cost is not; `core_timerevent` at ~490/s is the audio path, not
   us. Accurately described in the plan, worth almost nothing to fix.
@@ -135,10 +150,11 @@ top of `docs/POWER_OPTIMIZATION_PLAN.md`.
 ## Suggested order
 
 1. **Confirm the update path** - turn on On-Device Updates, deploy with `--persist`, reboot.
-   Everything below ships faster once that is proven, and it is a two-minute test.
+   Everything below ships faster once that is proven, and it is a two-minute test. Run
+   `tools/diskos-probe.sh` on the same trip: it is read-only and now also answers the
+   `SONG(PATH)` index question for free.
 2. **Tier 0** key semantics - the biggest felt-quality win, and one RE session.
 3. **Tier 2 device pass** - queue while playing, reorder ahead of the playhead, reboot and resume.
 4. Tier 3 and the rest of Tier 5 as they earn it.
 
-**Host-side work remaining** (no device needed): scanner year and bitrate. Everything else on this
-page now needs hardware.
+**Host-side work remaining**: none. Everything left on this page needs hardware.

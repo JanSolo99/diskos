@@ -350,7 +350,10 @@ Append one row to the table in `settings.c` (fields, in order):
    into the `bind_tags()` / `bind_extra()` helper that fills them. Both statements use
    **explicit `?N` parameters** because SQLite numbers a bare `?` by order of appearance -
    adding a placeholder mid-list would silently renumber every later bind.
-4. Read it in `musicdb.c mdb_load()` and add it to `mdb_song_t`.
+4. Read it in `musicdb.c mdb_load()` and add it to `mdb_song_t` - but only if a LIST needs it.
+   `mdb_load()` builds every list on screen and holds the whole library in memory; a field one
+   detail screen reads belongs in a per-path query instead (see `mdb_song_extra_by_path`, which
+   is how Song Info gets year and bitrate) called from a `screenmgr.c` entry hook.
 5. **It only appears after a rescan.** Test with the scanner harness, not on hardware.
 
 **Change something on the Now Playing screen** - it is `ui.c`, function `ui_update()`.
@@ -492,8 +495,8 @@ refuses rather than arming a slot nothing will read.
 - **Physical key semantics** [device]. `0820`/`0821`/`0822` (key single / double / long action) are
   string-verified but never used, so the meaning of every press is still stock-player behaviour we
   do not control. Highest-value RE left - see `docs/ROADMAP.md` Tier 0.
-- Scanner still never writes year or bitrate. `DURATION` (`00192f0`) and `ADD_TIME` (`70fd409`) are
-  done.
+- Nothing left that can be done without the device. The scanner now writes `DURATION`, `ADD_TIME`,
+  year and bitrate; Song Info shows the last two.
 - No folder browser. `0408` = file/folder browse is string-verified; probe before building.
 - AirPlay: `mq_player` embeds a working stack that only needs its trigger tag pinned.
   `docs/RE_CATALOGUE.md` names the exact next step.
