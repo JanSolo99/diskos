@@ -113,22 +113,135 @@ MSHA=$(grep '^SHA256=' "$MAN" | cut -d= -f2)
 MSIZE=$(grep '^SIZE=' "$MAN" | cut -d= -f2)
 [ -n "$MSHA" ] && [ -n "$MSIZE" ] || { quarantine "malformed manifest" || exit 1; disarm; exit 0; }
 
-# verify_ui <file>: 0 only if it exactly matches the manifest (size, ELF32-LE, MIPS, sha256).
-verify_ui() {
+# ---- ON-DEVICE UPDATES (opt-in) ---------------------------------------------
+# The rootfs manifest is baked at flash time, so without this a locally built UI is
+# quarantined on the next boot and every permanent change costs a 60-90 minute
+# reflash. The opt-in lets the device ALSO accept a UI the user installed himself.
+#
+# THIS IS A DELIBERATE REDUCTION IN GUARANTEE, so it is off unless asked for. With
+# the rootfs manifest alone, the device will only run a binary the flasher blessed;
+# with updates enabled it will additionally run one whose hash matches a file
+# sitting next to it in /usr/data, which anyone with write access to /usr/data
+# could have produced. Write access to /usr/data already implies root on the
+# device, so this grants no new capability to an attacker who is already there -
+# but it does mean the rootfs is no longer the sole root of trust, and that is the
+# user's decision to make, not ours. Settings -> System -> On-Device Updates.
+#
+# WITHOUT the flag file, ASHA/ASIZE stay empty and every path below behaves
+# EXACTLY as it did before this feature existed.
+UPD_FLAG=/usr/data/diskos_updates_enabled
+UPD_DIR=/usr/data/diskos_update
+ADOPTED=/usr/data/diskos_adopted_manifest
+ASHA=; ASIZE=
+if [ -f "$UPD_FLAG" ] && [ -f "$ADOPTED" ]; then
+    ASHA=$(grep '^SHA256=' "$ADOPTED" | cut -d= -f2)
+    ASIZE=$(grep '^SIZE=' "$ADOPTED" | cut -d= -f2)
+    ABASE=$(grep '^BASE=' "$ADOPTED" | cut -d= -f2)
+    if [ -z "$ASHA" ] || [ -z "$ASIZE" ]; then
+        ASHA=; ASIZE=; log "adopted manifest malformed -> ignoring"
+    elif [ "$ABASE" != "$MSHA" ]; then
+        # A REFLASH MUST WIN. /usr/data survives a rootfs flash, so without this the
+        # sequence "adopt a build, then reflash with a newer UI" would leave the OLD
+        # adopted binary at /usr/data/mq_ui, still verifying against this manifest -
+        # the fast path would take it and the freshly flashed UI would never install.
+        # BASE records which rootfs manifest the adoption was made against; a different
+        # one means the baseline was deliberately replaced, so the adoption is over.
+        # (A manifest written before BASE existed has none, so it is dropped too.)
+        ASHA=; ASIZE=
+        rm -f "$ADOPTED" 2>/dev/null
+        log "rootfs reflashed since the last adopted update -> adoption dropped, flashed UI wins"
+    fi
+fi
+
+# verify_shape <file>: the structural checks that hold for ANY diskOS UI, whatever
+# blessed it. A wrong-architecture or non-ELF file must never be chmod +x and run as
+# root, and that is true of an adopted update exactly as it is of the flashed one.
+verify_shape() {
     f="$1"; [ -f "$f" ] || return 1
-    sz=$(stat -c%s "$f" 2>/dev/null); [ -n "$sz" ] || sz=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
-    [ "$sz" = "$MSIZE" ]                      || { log "verify $f: size $sz != $MSIZE"; return 1; }
     [ "$(od -An -tx1 -N4 "$f" | tr -d ' ')" = "7f454c46" ] || { log "verify $f: not ELF"; return 1; }
     [ "$(od -An -tx1 -j4 -N2 "$f" | tr -d ' ')" = "0101" ] || { log "verify $f: not ELF32-LE"; return 1; }  # EI_CLASS=32,EI_DATA=LE
     [ "$(od -An -tx1 -j18 -N2 "$f" | tr -d ' ')" = "0800" ] || { log "verify $f: not MIPS"; return 1; }
-    [ "$(sha256sum "$f" | cut -d' ' -f1)" = "$MSHA" ]       || { log "verify $f: sha256 mismatch"; return 1; }
+    return 0
+}
+fsize() { sz=$(stat -c%s "$1" 2>/dev/null); [ -n "$sz" ] || sz=$(wc -c < "$1" 2>/dev/null | tr -d ' '); echo "$sz"; }
+
+# verify_ui <file>: 0 only if it matches the ROOTFS manifest (size + sha256), or - when
+# on-device updates are enabled - the ADOPTED manifest. Shape is checked either way.
+# With updates off, ASHA is empty and this is the original manifest-only test.
+verify_ui() {
+    f="$1"; [ -f "$f" ] || return 1
+    verify_shape "$f" || return 1
+    sz=$(fsize "$f")
+    sha=$(sha256sum "$f" | cut -d' ' -f1)
+    [ "$sz" = "$MSIZE" ] && [ "$sha" = "$MSHA" ] && return 0
+    if [ -n "$ASHA" ]; then
+        [ "$sz" = "$ASIZE" ] && [ "$sha" = "$ASHA" ] && { log "verified against ADOPTED update manifest"; return 0; }
+    fi
+    log "verify $f: size $sz / sha $sha matches neither the rootfs manifest nor an adopted update"
+    return 1
+}
+
+# ---- pending update, applied BEFORE the fast path ----------------------------
+# The slot is one-shot: it is cleared whether it verifies or not, so a corrupt drop
+# cannot make the device retry (and re-log) it on every boot forever. A successful
+# adopt records the new hash, which is what lets the NEXT boot's verify_ui accept it.
+apply_pending_update() {
+    [ -f "$UPD_FLAG" ] || return 1
+    [ -f "$UPD_DIR/mq_ui" ] && [ -f "$UPD_DIR/mq_ui.sha256" ] || return 1
+    want=$(cut -d' ' -f1 < "$UPD_DIR/mq_ui.sha256" | tr -d '\r\n\t ')
+    got=$(sha256sum "$UPD_DIR/mq_ui" | cut -d' ' -f1)
+    sz=$(fsize "$UPD_DIR/mq_ui")
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then
+        log "pending update: sha mismatch (want ${want:-none}, got $got) -> discarded"
+        rm -rf "$UPD_DIR" 2>/dev/null
+        return 1
+    fi
+    if ! verify_shape "$UPD_DIR/mq_ui"; then
+        log "pending update: not a MIPS ELF32-LE binary -> discarded"
+        rm -rf "$UPD_DIR" 2>/dev/null
+        return 1
+    fi
+    # Stage into the same temp the normal install path uses, so publishing is ONE code
+    # path. Staging FIRST is what makes a failed update a non-event: nothing has been
+    # moved aside yet, so the running install is still exactly where it was.
+    if ! cp -f "$UPD_DIR/mq_ui" /usr/data/.mq_ui.tmp 2>/dev/null; then
+        log "pending update: staging copy failed -> discarded, installed UI untouched"
+        rm -f /usr/data/.mq_ui.tmp 2>/dev/null; rm -rf "$UPD_DIR" 2>/dev/null
+        return 1
+    fi
+    # Record BEFORE publishing: if power is lost between the two, the next boot finds
+    # an adopted manifest that verify_ui can match, rather than an orphaned binary it
+    # would quarantine.
+    printf 'SHA256=%s\nSIZE=%s\nBASE=%s\n' "$got" "$sz" "$MSHA" > "$ADOPTED" 2>/dev/null
+    ASHA="$got"; ASIZE="$sz"
+    # Keep the outgoing binary for a hand rollback. A RENAME, not a copy: it costs no
+    # flash, and it also empties /usr/data/mq_ui so the pre-emptive quarantine below has
+    # only the symlink left to drop - otherwise a second copy of the same bytes would
+    # land in mq_ui.rejected as well. One rollback deep is deliberate; a chain of them is
+    # dead weight on a device whose recovery story is "push it again".
+    [ -f /usr/data/mq_ui ] && mv -f /usr/data/mq_ui /usr/data/mq_ui.prev 2>/dev/null
+    rm -rf "$UPD_DIR" 2>/dev/null
+    log "pending update adopted (sha $got, $sz bytes); previous kept at /usr/data/mq_ui.prev"
     return 0
 }
 
-rm -f /usr/data/.mq_ui.tmp 2>/dev/null   # never trust a leftover temp from a prior interrupted run
+pending=0
+if apply_pending_update; then pending=1; fi
+
+# A pending update has already staged .mq_ui.tmp, so do NOT clear it in that case.
+[ "$pending" = 1 ] || rm -f /usr/data/.mq_ui.tmp 2>/dev/null   # never trust a leftover temp from a prior interrupted run
+
+if [ "$pending" = 1 ]; then
+    # Route the staged update through the SAME publish block the install path uses,
+    # by declaring it copied. Everything below - verify, chmod, atomic mv, symlink,
+    # re-verify, and quarantine on any failure - then applies unchanged.
+    copied=1; src=update
+fi
 
 # FAST PATH: an already-installed matching UI -> just repair exec bit + symlink and boot.
-if verify_ui /usr/data/mq_ui; then
+# Skipped when an update is staged: the point of the update is to REPLACE what is
+# installed, and the installed copy may well verify against the adopted manifest.
+if [ "$pending" != 1 ] && verify_ui /usr/data/mq_ui; then
     if publish_symlink; then
         installed=1; disarm                     # a completed install: disarm before exit so no late-signal quarantine
         log "already installed + verified -> repaired +x/symlink, booting diskOS"
@@ -145,7 +258,14 @@ fi
 # a verified one. (The whole-run trap above already covers signals; this closes the window
 # deterministically even absent a signal.)
 if [ -e /usr/data/mq_ui ] || [ -e /usr/data/mq_player ]; then
-    quarantine "unverified at boot" || exit 1
+    if [ "$pending" = 1 ]; then
+        # Not a fault: the override is taken down ON PURPOSE for the duration of the
+        # write, so an interruption mid-publish falls back to stock rather than to a
+        # half-written binary. quarantine() does not touch the staged temp.
+        quarantine "staging update" || exit 1
+    else
+        quarantine "unverified at boot" || exit 1
+    fi
 fi
 
 # INSTALL PATH - SOURCE PRECEDENCE (deterministic, NOT newest-wins): try the copy EMBEDDED in this
@@ -154,9 +274,9 @@ fi
 # source. The embedded source only "wins" (copied=1, SD skipped) when its temp passes verify_ui - so
 # a valid same-hash SD copy CAN rescue a corrupted embedded copy. The SD is a fallback SOURCE, not an
 # override (no version/newer-wins). The winning temp is re-verified + published below.
-copied=0; src=
+[ "$pending" = 1 ] || { copied=0; src=; }
 EMBED=/opt/diskos/mq_ui
-if [ -f "$EMBED" ]; then
+if [ "$copied" != 1 ] && [ -f "$EMBED" ]; then
     # Embedded copy lives in the read-only rootfs we just flashed. TO-bound the cp for consistency
     # (a NAND read fault shouldn't stall boot), and verify_ui the temp IN-BRANCH: only a verified
     # embedded copy suppresses the SD fallback.
@@ -206,10 +326,10 @@ if [ "$copied" = 1 ]; then
        && mv -f /usr/data/.mq_ui.tmp /usr/data/mq_ui \
        && publish_symlink \
        && verify_ui /usr/data/mq_ui; then
-        installed=1; log "installed verified mq_ui from ${src:-?} (size $MSIZE)"
+        installed=1; log "installed verified mq_ui from ${src:-?} (size $(fsize /usr/data/mq_ui))"
         TO sync 2>/dev/null || log "post-install sync slow/timed-out (ubifs is sync-mounted; already durable)"
     else
-        log "SD copy failed verification/publish -> not installed"
+        log "${src:-?} copy failed verification/publish -> not installed"
     fi
 fi
 rm -f /usr/data/.mq_ui.tmp 2>/dev/null   # always clean the temp, incl. a timed-out/partial copy
