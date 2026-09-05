@@ -153,6 +153,10 @@ Nothing else has a glyph, so it draws as a black box. Two rules follow:
   (`e0bc478`, 2026-08-26), predating every UI fix on this branch. `install`/`diskos-manager install`
   without an explicit `--ui path/to/fresh/mq_ui` flashes that old binary silently. Always pass `--ui`
   when testing branch work.
+- **Physical power-key input is owned by `mq_player`:** it exclusively grabs `/dev/input/event0`,
+  which also carries volume/play/power buttons. The player forwards power-key activity as the
+  documented `aa1c` frame on `/ui`; `ipc.c` turns that into a wake event and `main.c` restores the
+  backlight when the saver is dimmed/off. Do not read event0 or invent a power command from the UI.
 
 ## Build
 
@@ -161,6 +165,12 @@ cd ui
 docker build -t diskos-ui-builder .                                   # pinned musl mipsel toolchain
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" diskos-ui-builder
 ```
+
+On this Windows checkout, Docker may not be able to bind-mount either `/mnt/f` or the WSL-native
+clone, depending on which daemon/context is active. If the container says `/src/Makefile` is
+missing, use the WSL-native clone and `docker cp` the source into a temporary container instead of
+changing the source tree or deploying the empty/missing output. Always verify the final binary with
+`file ui/mq_ui`; it must report MIPS.
 
 Fast correctness check with no cross toolchain - catches missing symbols and bad prototypes in
 seconds, though the result cannot run:
@@ -385,6 +395,8 @@ own verdict.
 | A black box where a character should be | No font we ship has that glyph. If it is our own string, make it ASCII (`tests/glyphcheck.py` finds them). If it is tag/network text, route it through `txt_fold_ascii()`. |
 | A scanner change had no effect | `song.db` is only rewritten by a rescan. Menu -> Scan on the device, or re-run the scanner harness. |
 | Tapping a track plays a DIFFERENT track | The on-screen order and `mdb_play_pos()`'s `ORDER BY` disagree. A tap is a position in the player's list, not a path. |
+| One album advances to an unexpected track in Sequential mode | Rescan first, then inspect that album's exact `ALBUM`, `DISC`, `TRACK`, `IS_CUE`, and `IS_ISO` rows. Missing/stale track tags or CUE/ISO rows can make the UI/player order differ; do not change `0102` based on one album. |
+| Power button does not wake a screen-off panel | `mq_player` owns event0; diskOS must receive `aa1c` and wake through the IPC event path. Do not kill or trace `mq_player`; capture `mq_ui`/`/ui` behavior only. |
 | The whole UI froze, or the screen will not wake | Something slow on the LVGL thread - an unbounded `popen`, a blocking network call. Bound it or move it to a worker. |
 | Settings shows a stale value on re-entry | The screen needs a refresh hook in `screenmgr.c`'s entry switch. |
 | `install.sh` or a `tools/*.sh` dies with `invalid option name` or `$'\r'` | You ran a CRLF checkout of the script under WSL bash. Run it from the WSL-native clone (`~/diskos-build`), not `/mnt/f/...`. |
@@ -456,6 +468,11 @@ on hardware is spelled out after the list):
 - `main.c`: volume keys are read straight off the GPB pin (bit 13/14), so the volume bar paints on
   the key edge instead of waiting for the player's a714 - the player grabs `event0` exclusively and
   sits on a single press watching for a double-press track skip. **Confirmed faster on device.**
+- `ipc.c`/`main.c`: physical power-key activity is reported by `mq_player` as `aa1c`; diskOS now
+  consumes that event to wake the dimmed/off backlight and leave the saver. The payload semantics
+  for press/release/long-press remain stock-player behavior, so this is a wake notification only.
+  Built and pushed as commit `b02da75`; hardware confirmation of the direct power-button wake is
+  still pending.
 - `ipc.c`: ignore a `song_duration_time` of 0 for the track already playing (the 0102 mode-change
   reply re-announces the song with a partial body, snapping the NP ring to the start for a frame).
   Hypothesis-driven - not yet confirmed against a captured a2 frame.
@@ -474,10 +491,12 @@ on hardware is spelled out after the list):
   hypotheses, not diagnoses: none was reproduced against that exact build, and none of the
   fixes has been on hardware yet. Re-test before assuming any of the three is closed.
 - Never yet exercised on device: theme switching, a library rescan, the menu-grid layout, the
-  scroll memory, and the Now Playing progress-flash fix.
+  scroll memory, the Now Playing progress-flash fix, and the new power-key wake path.
 
-The honest summary: the deploy path is proven, the volume fix is proven, and everything else is
-waiting on one deploy-plus-rescan pass.
+The honest summary: the deploy path is proven, the volume fix is proven, and the power-key wake
+path is built and pushed but needs hardware confirmation. Library ordering fixes still require one
+deploy-plus-rescan pass; a C418 Minecraft Volume Alpha report is currently undiagnosed and may be
+album metadata/database ordering rather than Sequential mode.
 
 Known gaps worth doing next, in rough order: the scanner still never writes `DURATION`, year or
 bitrate, and binds `ADD_TIME` to a hardcoded constant; there is no on-device update path (every
