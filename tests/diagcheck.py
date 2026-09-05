@@ -78,8 +78,17 @@ def main():
     check(diag.redact(f"only reachable as {user}; see README")
           == f"only reachable as {user}; see README",
           "the username mid-sentence is left alone")
-    check(diag.redact(f"/home/{user}/thing.bin") == "/home/<user>/thing.bin",
+    # This used to assert on /home/<user>/thing.bin, which fails for every account
+    # whose home IS /home/<username> - the home-collapse rule runs first and yields
+    # "~/thing.bin". That output is equally redacted, so the implementation was
+    # right and the expectation was wrong; it only ever passed for root, whose home
+    # is /root. Test the rule with a path that is never the home directory (the
+    # implementation calls out /media/<user>/x), then assert the property that
+    # actually matters for both.
+    check(diag.redact(f"/media/{user}/card") == "/media/<user>/card",
           "the username as a path component is redacted")
+    check(user not in diag.redact(f"/home/{user}/thing.bin"),
+          "a path under home leaks no username, whichever rule fires")
     check(diag.redact(f"{home}/state/x") == "~/state/x",
           "the home directory collapses to ~")
     check(diag.redact(f"{home}x/not-home") == f"{home}x/not-home",
