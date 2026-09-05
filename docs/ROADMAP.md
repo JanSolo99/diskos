@@ -55,10 +55,15 @@ can edit its live queue with no rebuild and no IPC tag. See `docs/QUEUE_DESIGN.m
 - [x] **UI** - done, commit `3d3b5f9`: long-press a song -> *Play next* / *Add to queue*; the
   Queue screen reads `LIST_SONG_0` directly and gained remove + clear. Album, artist and genre
   rows now hold for *Play all* / *Add to queue* too. STILL TO DO: drag-to-reorder.
-- [ ] **Fix "play all by artist"** [host]. Today it sends the player `list_type 2` + a name and
-  the player filters `WHERE ARTIST=?`, so an album-artist row queues fewer tracks than the UI
-  lists. Now that we can write `LIST_SONG_0` ourselves, we can build the exact list instead -
-  this stops being a structural limitation and becomes a bug we can close.
+- [ ] **Fix "play all by artist"** [device to verify]. It still sends the player `list_type 2` +
+  a name, and the player filters `WHERE ARTIST=?`, so an album-artist row plays fewer tracks
+  than the UI lists. The MECHANISM to fix it now exists - `mdb_queue_append_ids()` builds the
+  exact list - and *Add to queue* on an artist row already uses it, so the workaround is one
+  gesture away today.
+  Deliberately NOT switched over yet: doing so would replace `LIST_SONG_0` wholesale and then
+  send a bare position jump, and we have only verified that the player re-reads the table as it
+  ADVANCES - not that it re-reads a wholesale replacement under a jump. Changing the most-used
+  action in the UI on an unverified assumption is the wrong trade. One device test settles it.
 - [ ] **Device pass** [device]. Add while playing without glitching the current track; reorder
   ahead of the playhead; reboot and confirm resume still lands correctly.
 
