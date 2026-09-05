@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "ipc.h"
+#include "txtfold.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,14 +132,34 @@ static void parse_a2(const char*payload,int len){
         int n2=jsmn_parse(&p2,song,strlen(song),st,96);
         if(n2>0){
             int sv, got=0;   /* got = we found a REAL track field (name or path) */
+            /* snapshot BEFORE song_file_path overwrites it - the duration guard below
+             * needs to know whether this frame is the same track or a new one. */
+            char prev_path[sizeof g_state.path];
+            snprintf(prev_path, sizeof prev_path, "%s", g_state.path);
             /* unescape (not copy_tok) every string field: the inner song JSON still
              * carries its own \/ \" \uXXXX escapes after the outer unescape, so titles
              * with slashes/quotes/CJK would otherwise render literally (matches path). */
-            sv=find_val(song,st,n2,"song_name");          if(sv>=0){ unescape(song+st[sv].start, st[sv].end-st[sv].start, g_state.title,  sizeof g_state.title);  got=1; }
-            sv=find_val(song,st,n2,"song_artist_name");   if(sv>=0) unescape(song+st[sv].start, st[sv].end-st[sv].start, g_state.artist, sizeof g_state.artist);
-            sv=find_val(song,st,n2,"song_album_name");    if(sv>=0) unescape(song+st[sv].start, st[sv].end-st[sv].start, g_state.album,  sizeof g_state.album);
+            /* txt_fold_ascii: the player hands us the tag bytes verbatim, and a curly
+             * apostrophe / accented letter has no glyph in Montserrat OR the CJK
+             * fallback - it draws as a box (see txtfold.h). Folded on the way IN so
+             * every consumer (labels, scrobbles, lyrics lookup) sees the same text.
+             * song_file_path is deliberately NOT folded: it must keep its exact bytes. */
+            sv=find_val(song,st,n2,"song_name");          if(sv>=0){ unescape(song+st[sv].start, st[sv].end-st[sv].start, g_state.title,  sizeof g_state.title);  txt_fold_ascii(g_state.title);  got=1; }
+            sv=find_val(song,st,n2,"song_artist_name");   if(sv>=0){ unescape(song+st[sv].start, st[sv].end-st[sv].start, g_state.artist, sizeof g_state.artist); txt_fold_ascii(g_state.artist); }
+            sv=find_val(song,st,n2,"song_album_name");    if(sv>=0){ unescape(song+st[sv].start, st[sv].end-st[sv].start, g_state.album,  sizeof g_state.album);  txt_fold_ascii(g_state.album);  }
             sv=find_val(song,st,n2,"song_file_path");     if(sv>=0){ unescape(song+st[sv].start, st[sv].end-st[sv].start, g_state.path,   sizeof g_state.path);   got=1; }
-            sv=find_val(song,st,n2,"song_duration_time"); if(sv>=0) g_state.duration_ms=tok_long(song,&st[sv]);
+            sv=find_val(song,st,n2,"song_duration_time");
+            if(sv>=0){
+                long d = tok_long(song,&st[sv]);
+                /* Accept 0 ONLY on a real track change. Now Playing computes the arc as
+                 * pos/dur, so a single frame reporting duration 0 for the track that is
+                 * still playing snaps the ring back to the start and then jumps forward
+                 * again on the next frame - the flicker seen when cycling play mode,
+                 * whose 0102 reply re-announces the current song with a partial body.
+                 * A playing track never legitimately has duration 0, so ignoring it here
+                 * costs nothing and a genuinely durationless NEW track still reads 0. */
+                if(d > 0 || strcmp(g_state.path, prev_path) != 0) g_state.duration_ms = d;
+            }
             sv=find_val(song,st,n2,"song_sample_rate");   if(sv>=0) g_state.sample_rate=(int)tok_long(song,&st[sv]);
             sv=find_val(song,st,n2,"is_dsd");             if(sv>=0) g_state.is_dsd=tok_bool(song,&st[sv]);
             if(got) g_state.have_track=1;

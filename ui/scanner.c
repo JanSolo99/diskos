@@ -40,6 +40,24 @@
 #define MAXPATH   1024
 #define TAGLEN    256
 
+/* One file's parsed tags. Passed by POINTER through every container parser so that
+ * adding a field (album artist, disc, track) costs one struct member instead of a
+ * signature change in a dozen places. */
+typedef struct {
+    char title[TAGLEN], artist[TAGLEN], album[TAGLEN], genre[TAGLEN];
+    char album_artist[TAGLEN];   /* TPE2 / ALBUMARTIST / aART - empty when the file has none */
+    int  disc, track;            /* 0 = unknown; sorts LAST, matching the player's ORDER BY */
+} tags_t;
+
+/* "7", "07", "7/12", " 7 " -> 7.  Unparseable or absent -> 0 (= unknown).
+ * Track/disc tags are text in ID3 and Vorbis and routinely carry the "/total" half. */
+static int tag_num(const char *s){
+    while(*s == ' ' || *s == '	') s++;
+    int v = 0, any = 0;
+    while(*s >= '0' && *s <= '9'){ if(v < 100000) v = v*10 + (*s - '0'); any = 1; s++; }
+    return any ? v : 0;
+}
+
 /* ---- progress (published to the LVGL thread) ---- */
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static int g_active;          /* a scan is running */
@@ -185,7 +203,7 @@ static uint32_t synch32(const unsigned char *p){ return (p[0]<<21)|(p[1]<<14)|(p
 
 /* Read ID3v2 text frames (TIT2/TPE1/TALB/TCON, or v2.2 TT2/TP1/TAL/TCO). Returns 1 if the
  * header was present. Fields it doesn't find are left untouched. */
-static int id3v2_read(FILE *f, char *title,char *artist,char *album,char *genre){
+static int id3v2_read(FILE *f, tags_t *t){
     unsigned char h[10];
     if(fread(h,1,10,f)!=10) return 0;
     if(memcmp(h,"ID3",3)!=0) return 0;
@@ -217,10 +235,17 @@ static int id3v2_read(FILE *f, char *title,char *artist,char *album,char *genre)
             char val[TAGLEN]; id3_decode(enc, body+1, (int)fsize-1, val, sizeof val);
             if(val[0]){
                 const char *k = id;
-                if(!strcmp(k,"TIT2")||!strcmp(k,"TT2")) snprintf(title,TAGLEN,"%s",val);
-                else if(!strcmp(k,"TPE1")||!strcmp(k,"TP1")) snprintf(artist,TAGLEN,"%s",val);
-                else if(!strcmp(k,"TALB")||!strcmp(k,"TAL")) snprintf(album,TAGLEN,"%s",val);
-                else if(!strcmp(k,"TCON")||!strcmp(k,"TCO")){ snprintf(genre,TAGLEN,"%s",val); genre_clean(genre); }
+                if(!strcmp(k,"TIT2")||!strcmp(k,"TT2")) snprintf(t->title,TAGLEN,"%s",val);
+                else if(!strcmp(k,"TPE1")||!strcmp(k,"TP1")) snprintf(t->artist,TAGLEN,"%s",val);
+                else if(!strcmp(k,"TALB")||!strcmp(k,"TAL")) snprintf(t->album,TAGLEN,"%s",val);
+                else if(!strcmp(k,"TCON")||!strcmp(k,"TCO")){ snprintf(t->genre,TAGLEN,"%s",val); genre_clean(t->genre); }
+                /* TPE2 is the ALBUM artist ("50 Cent"), TPE1 the TRACK artist
+                 * ("50 Cent feat. Lloyd Banks") - grouping on TPE2 is what stops one
+                 * artist fragmenting into a row per collaborator. TRCK/TPOS are text
+                 * frames and are usually written "5/12", hence tag_num(). */
+                else if(!strcmp(k,"TPE2")||!strcmp(k,"TP2")) snprintf(t->album_artist,TAGLEN,"%s",val);
+                else if(!strcmp(k,"TRCK")||!strcmp(k,"TRK")) t->track = tag_num(val);
+                else if(!strcmp(k,"TPOS")||!strcmp(k,"TPA")) t->disc  = tag_num(val);
             }
         }
         p += fhdr + fsize;
@@ -229,15 +254,18 @@ static int id3v2_read(FILE *f, char *title,char *artist,char *album,char *genre)
     return 1;
 }
 /* ID3v1: last 128 bytes "TAG" + 30+30+30 title/artist/album (Latin-1). Fallback only. */
-static void id3v1_read(FILE *f, char *title,char *artist,char *album){
+static void id3v1_read(FILE *f, tags_t *t){
     if(fseek(f,-128,SEEK_END)!=0) return;
-    unsigned char t[128];
-    if(fread(t,1,128,f)!=128) return;
-    if(memcmp(t,"TAG",3)!=0) return;
+    unsigned char v1[128];                       /* not `t` - that is the tags_t param now */
+    if(fread(v1,1,128,f)!=128) return;
+    if(memcmp(v1,"TAG",3)!=0) return;
     char tmp[64];
-    if(!title[0]){  id3_decode(0, t+3,  30, tmp,sizeof tmp); if(tmp[0]) snprintf(title, TAGLEN,"%s",tmp); }
-    if(!artist[0]){ id3_decode(0, t+33, 30, tmp,sizeof tmp); if(tmp[0]) snprintf(artist,TAGLEN,"%s",tmp); }
-    if(!album[0]){  id3_decode(0, t+63, 30, tmp,sizeof tmp); if(tmp[0]) snprintf(album, TAGLEN,"%s",tmp); }
+    if(!t->title[0]){  id3_decode(0, v1+3,  30, tmp,sizeof tmp); if(tmp[0]) snprintf(t->title, TAGLEN,"%s",tmp); }
+    if(!t->artist[0]){ id3_decode(0, v1+33, 30, tmp,sizeof tmp); if(tmp[0]) snprintf(t->artist,TAGLEN,"%s",tmp); }
+    if(!t->album[0]){  id3_decode(0, v1+63, 30, tmp,sizeof tmp); if(tmp[0]) snprintf(t->album, TAGLEN,"%s",tmp); }
+    /* ID3v1.1 puts the track number in byte 126 when byte 125 is NUL (plain v1 has
+     * a 30-byte comment there, so a non-NUL 125 means there is no track number). */
+    if(!t->track && v1[125] == 0 && v1[126]) t->track = v1[126];
 }
 
 static uint32_t le32(const unsigned char *p){ return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
@@ -247,7 +275,7 @@ static uint32_t le32(const unsigned char *p){ return (uint32_t)p[0]|((uint32_t)p
  * (the Vorbis/Opus comment header), which use byte-identical bodies. Every length is
  * checked by SUBTRACTION against the remaining size so a hostile field can't wrap. */
 static void vc_parse(const unsigned char *b, uint32_t len,
-                     char *title, char *artist, char *album, char *genre)
+                     tags_t *t)
 {
     if(len < 8) return;
     uint32_t vlen = le32(b);
@@ -262,10 +290,17 @@ static void vc_parse(const unsigned char *b, uint32_t len,
             memcpy(kv, b+off, clen); kv[clen] = 0;
             char *eq = strchr(kv, '=');
             if(eq){ *eq = 0; const char *k = kv, *v = eq+1;
-                if(!strcasecmp(k,"TITLE")       && !title[0])  snprintf(title, TAGLEN,"%s",v);
-                else if(!strcasecmp(k,"ARTIST") && !artist[0]) snprintf(artist,TAGLEN,"%s",v);
-                else if(!strcasecmp(k,"ALBUM")  && !album[0])  snprintf(album, TAGLEN,"%s",v);
-                else if(!strcasecmp(k,"GENRE")  && !genre[0])  snprintf(genre, TAGLEN,"%s",v);
+                if(!strcasecmp(k,"TITLE")       && !t->title[0])  snprintf(t->title, TAGLEN,"%s",v);
+                else if(!strcasecmp(k,"ARTIST") && !t->artist[0]) snprintf(t->artist,TAGLEN,"%s",v);
+                else if(!strcasecmp(k,"ALBUM")  && !t->album[0])  snprintf(t->album, TAGLEN,"%s",v);
+                else if(!strcasecmp(k,"GENRE")  && !t->genre[0])  snprintf(t->genre, TAGLEN,"%s",v);
+                /* all three spellings are in the wild: Picard writes ALBUMARTIST,
+                 * foobar2000 "ALBUM ARTIST", some rippers ALBUM_ARTIST. */
+                else if((!strcasecmp(k,"ALBUMARTIST") || !strcasecmp(k,"ALBUM ARTIST") ||
+                         !strcasecmp(k,"ALBUM_ARTIST")) && !t->album_artist[0])
+                    snprintf(t->album_artist, TAGLEN,"%s",v);
+                else if(!strcasecmp(k,"TRACKNUMBER") && !t->track) t->track = tag_num(v);
+                else if(!strcasecmp(k,"DISCNUMBER")  && !t->disc)  t->disc  = tag_num(v);
             }
         }
         off += clen;
@@ -274,7 +309,7 @@ static void vc_parse(const unsigned char *b, uint32_t len,
 
 /* FLAC: "fLaC" magic + metadata blocks; parse the VORBIS_COMMENT block (type 4) for
  * TITLE/ARTIST/ALBUM/GENRE (UTF-8, little-endian lengths). Bounded like the ID3 path. */
-static void flac_read(FILE *f, char *title,char *artist,char *album,char *genre){
+static void flac_read(FILE *f, tags_t *t){
     unsigned char magic[4];
     if(fread(magic,1,4,f)!=4 || memcmp(magic,"fLaC",4)!=0) return;
     for(int guard=0; guard<256; guard++){
@@ -285,7 +320,7 @@ static void flac_read(FILE *f, char *title,char *artist,char *album,char *genre)
         if(type==4){                                    /* VORBIS_COMMENT */
             if(len<8 || len>1024*1024) return;
             unsigned char *b=malloc(len); if(!b) return;
-            if(fread(b,1,len,f)==len) vc_parse(b, len, title, artist, album, genre);
+            if(fread(b,1,len,f)==len) vc_parse(b, len, t);
             free(b);
             return;                                      /* got the comment block */
         }
@@ -307,7 +342,7 @@ static void flac_read(FILE *f, char *title,char *artist,char *album,char *genre)
  * read the whole card. */
 #define OGG_SCAN  (96*1024)
 #define OGG_PAGES 24
-static void ogg_read(FILE *f, char *title,char *artist,char *album,char *genre)
+static void ogg_read(FILE *f, tags_t *t)
 {
     unsigned char *raw = malloc(OGG_SCAN);
     if(!raw) return;
@@ -345,7 +380,7 @@ static void ogg_read(FILE *f, char *title,char *artist,char *album,char *genre)
         if(!memcmp(log+i, "\x03vorbis", 7))      off = i + 7;
         else if(!memcmp(log+i, "OpusTags", 8))   off = i + 8;
         else continue;
-        vc_parse(log + off, (uint32_t)(lg - off), title, artist, album, genre);
+        vc_parse(log + off, (uint32_t)(lg - off), t);
         break;
     }
     free(log);
@@ -361,13 +396,30 @@ static void ogg_read(FILE *f, char *title,char *artist,char *album,char *genre)
  * are treated as "stop", since we only care about the small metadata atoms. */
 #define MP4_DEPTH 6
 static void mp4_ilst_field(FILE *f, const char *type, long size,
-                           char *title,char *artist,char *album,char *genre)
+                           tags_t *t)
 {
+    /* trkn/disk are BINARY data atoms, not text: after the 16-byte data header the
+     * payload is reserved(2) + number(2, big-endian) + total(2) + reserved(2). They
+     * must be handled BEFORE the printable-text check below, which would reject them
+     * (the same check that deliberately rejects the numeric `gnre` index). */
+    if(!memcmp(type, "trkn", 4) || !memcmp(type, "disk", 4)){
+        int is_disc = !memcmp(type, "disk", 4);
+        if((is_disc ? t->disc : t->track) || size < 20) return;   /* already set, or too short */
+        unsigned char nh[16], nb[4];
+        if(fread(nh, 1, 16, f) != 16) return;
+        if(memcmp(nh+4, "data", 4) != 0) return;
+        if(fread(nb, 1, 4, f) != 4) return;
+        int v = (nb[2] << 8) | nb[3];                 /* reserved(2), then the 16-bit number */
+        if(v > 0){ if(is_disc) t->disc = v; else t->track = v; }
+        return;
+    }
+
     char *dst = NULL;
-    if     (!memcmp(type, "\xA9""nam", 4)) dst = title;
-    else if(!memcmp(type, "\xA9""ART", 4)) dst = artist;
-    else if(!memcmp(type, "\xA9""alb", 4)) dst = album;
-    else if(!memcmp(type, "\xA9""gen", 4) || !memcmp(type, "gnre", 4)) dst = genre;
+    if     (!memcmp(type, "\xA9""nam", 4)) dst = t->title;
+    else if(!memcmp(type, "\xA9""ART", 4)) dst = t->artist;
+    else if(!memcmp(type, "\xA9""alb", 4)) dst = t->album;
+    else if(!memcmp(type, "aART", 4))       dst = t->album_artist;   /* iTunes album artist */
+    else if(!memcmp(type, "\xA9""gen", 4) || !memcmp(type, "gnre", 4)) dst = t->genre;
     if(!dst || dst[0] || size < 16 || size > 64*1024) return;   /* first writer wins, like the other parsers */
 
     unsigned char hdr[16];
@@ -386,10 +438,10 @@ static void mp4_ilst_field(FILE *f, const char *type, long size,
     for(long i = 0; i < vlen; i++) if(buf[i] >= 0x20 || buf[i] == '\n'){ printable = 1; break; }
     if(!printable) return;
     id3_decode(3, buf, (int)vlen, dst, TAGLEN);   /* enc 3 = UTF-8 passthrough + trim */
-    if(dst == genre) genre_clean(genre);
+    if(dst == t->genre) genre_clean(t->genre);
 }
 static void mp4_walk(FILE *f, long end, int depth,
-                     char *title,char *artist,char *album,char *genre)
+                     tags_t *t)
 {
     if(depth > MP4_DEPTH) return;
     for(int guard = 0; guard < 256; guard++){
@@ -404,25 +456,28 @@ static void mp4_walk(FILE *f, long end, int depth,
         const char *ty = (const char*)h+4;
         long body = pos + 8, next = pos + size;
         if(!memcmp(ty,"moov",4) || !memcmp(ty,"udta",4) || !memcmp(ty,"ilst",4)){
-            mp4_walk(f, next, depth+1, title, artist, album, genre);
+            mp4_walk(f, next, depth+1, t);
         } else if(!memcmp(ty,"meta",4)){
             if(fseek(f, body + 4, SEEK_SET) != 0) return;   /* meta: skip version/flags */
-            mp4_walk(f, next, depth+1, title, artist, album, genre);
+            mp4_walk(f, next, depth+1, t);
         } else if(depth > 0 && ty[0] == (char)0xA9){
-            mp4_ilst_field(f, ty, size, title, artist, album, genre);
-        } else if(!memcmp(ty,"gnre",4)){
-            mp4_ilst_field(f, ty, size, title, artist, album, genre);
+            mp4_ilst_field(f, ty, size, t);
+        } else if(!memcmp(ty,"gnre",4) || !memcmp(ty,"aART",4) ||
+                  !memcmp(ty,"trkn",4) || !memcmp(ty,"disk",4)){
+            /* the ilst atoms that do NOT start with the 0xA9 marker: the numeric
+             * genre index, the album artist, and the binary track/disc pairs. */
+            mp4_ilst_field(f, ty, size, t);
         }
         if(fseek(f, next, SEEK_SET) != 0) return;
     }
 }
-static void mp4_read(FILE *f, char *title,char *artist,char *album,char *genre)
+static void mp4_read(FILE *f, tags_t *t)
 {
     if(fseek(f, 0, SEEK_END) != 0) return;
     long end = ftell(f);
     if(end <= 8) return;
     if(fseek(f, 0, SEEK_SET) != 0) return;
-    mp4_walk(f, end, 0, title, artist, album, genre);
+    mp4_walk(f, end, 0, t);
 }
 
 /* ---- APEv2 (.ape / .wv / .mpc / .tta) ------------------------------------
@@ -430,7 +485,7 @@ static void mp4_read(FILE *f, char *title,char *artist,char *album,char *genre)
  * it. Footer: "APETAGEX" + version(4) + tagsize(4, includes the footer) +
  * itemcount(4) + flags(4) + reserved(8), all little-endian. Items are
  * valuesize(4) + flags(4) + key(NUL-terminated ASCII) + value(UTF-8). */
-static void apev2_read(FILE *f, char *title,char *artist,char *album,char *genre)
+static void apev2_read(FILE *f, tags_t *t)
 {
     /* Zeroed: if BOTH probes fail (a file shorter than the footer, or a read error)
      * nothing is ever written here, and the match below would read uninitialised
@@ -467,22 +522,33 @@ static void apev2_read(FILE *f, char *title,char *artist,char *album,char *genre
         off += klen + 1;
         if(vsize > body - off) break;             /* overflow-safe */
         char *dst = NULL;
-        if     (!strcasecmp(key,"Title"))  dst = title;
-        else if(!strcasecmp(key,"Artist")) dst = artist;
-        else if(!strcasecmp(key,"Album"))  dst = album;
-        else if(!strcasecmp(key,"Genre"))  dst = genre;
+        if     (!strcasecmp(key,"Title"))  dst = t->title;
+        else if(!strcasecmp(key,"Artist")) dst = t->artist;
+        else if(!strcasecmp(key,"Album"))  dst = t->album;
+        else if(!strcasecmp(key,"Genre"))  dst = t->genre;
+        else if(!strcasecmp(key,"Album Artist") || !strcasecmp(key,"ALBUMARTIST"))
+                                           dst = t->album_artist;
         if(dst && !dst[0] && vsize > 0)
             id3_decode(3, b+off, (int)(vsize < TAGLEN-1 ? vsize : TAGLEN-1), dst, TAGLEN);
+        else if(vsize > 0 && (!strcasecmp(key,"Track") || !strcasecmp(key,"Disc"))){
+            char num[32];   /* APEv2 numerics are text, same "n/total" shape as ID3 */
+            id3_decode(3, b+off, (int)(vsize < sizeof num - 1 ? vsize : sizeof num - 1), num, sizeof num);
+            int v = tag_num(num);
+            if(v > 0){
+                if(!strcasecmp(key,"Disc")){ if(!t->disc)  t->disc  = v; }
+                else                       { if(!t->track) t->track = v; }
+            }
+        }
         off += vsize;
     }
     free(b);
-    if(genre[0]) genre_clean(genre);
+    if(t->genre[0]) genre_clean(t->genre);
 }
 
 /* ---- DSF -----------------------------------------------------------------
  * "DSD " chunk header: magic(4) + chunk size(8) + total file size(8) + a 64-bit
  * pointer to an ID3v2 tag (0 = none). Seek there and reuse the ID3 reader. */
-static void dsf_read(FILE *f, char *title,char *artist,char *album,char *genre)
+static void dsf_read(FILE *f, tags_t *t)
 {
     unsigned char h[28];
     if(fseek(f, 0, SEEK_SET) != 0) return;
@@ -492,7 +558,7 @@ static void dsf_read(FILE *f, char *title,char *artist,char *album,char *genre)
     uint64_t ptr = (uint64_t)le32(h+20) | ((uint64_t)le32(h+24) << 32);
     if(ptr < 28 || ptr > 0x7FFFFFFFull) return;
     if(fseek(f, (long)ptr, SEEK_SET) != 0) return;
-    id3v2_read(f, title, artist, album, genre);
+    id3v2_read(f, t);
 }
 
 /* 1 = tags/fallback filled OK; 0 = a tag-bearing file (mp3/flac) that could NOT be opened (transient
@@ -507,34 +573,36 @@ static int has_tag_parser(const char *fname){
         || has_ext(fname,".wv")   || has_ext(fname,".mpc")  || has_ext(fname,".tta")
         || has_ext(fname,".dsf");
 }
-static int tags_from_file(const char *path, const char *fname,
-                          char *title,char *artist,char *album,char *genre){
-    title[0]=artist[0]=album[0]=genre[0]=0;
+static int tags_from_file(const char *path, const char *fname, tags_t *t){
+    memset(t, 0, sizeof *t);
     FILE *f=fopen(path,"rb");
     if(!f && has_tag_parser(fname))
         return 0;   /* can't read a file we should have tags for -> don't clobber; caller skips it */
     if(f){
-        if(has_ext(fname,".flac")) flac_read(f,title,artist,album,genre);
-        else if(has_ext(fname,".mp3")){ id3v2_read(f,title,artist,album,genre); id3v1_read(f,title,artist,album); }
+        if(has_ext(fname,".flac")) flac_read(f,t);
+        else if(has_ext(fname,".mp3")){ id3v2_read(f,t); id3v1_read(f,t); }
         else if(has_ext(fname,".ogg") || has_ext(fname,".oga") || has_ext(fname,".opus"))
-            ogg_read(f,title,artist,album,genre);
+            ogg_read(f,t);
         else if(has_ext(fname,".m4a") || has_ext(fname,".m4b") || has_ext(fname,".mp4"))
-            mp4_read(f,title,artist,album,genre);
+            mp4_read(f,t);
         else if(has_ext(fname,".ape") || has_ext(fname,".wv") || has_ext(fname,".mpc") || has_ext(fname,".tta"))
-            apev2_read(f,title,artist,album,genre);
-        else if(has_ext(fname,".dsf")) dsf_read(f,title,artist,album,genre);
+            apev2_read(f,t);
+        else if(has_ext(fname,".dsf")) dsf_read(f,t);
         /* .wav/.aif/.aiff/.dff/.wma/.aac -> filename fallback below; no tag probing, so a
          * WAV whose last 128 bytes happen to start with "TAG" isn't misread as ID3v1. */
         fclose(f);
     }
-    if(!title[0]){                               /* filename (minus extension) */
-        snprintf(title,TAGLEN,"%s",fname);
-        char *dot=strrchr(title,'.'); if(dot) *dot=0;
-        str_trim(title);
+    if(!t->title[0]){                            /* filename (minus extension) */
+        snprintf(t->title,TAGLEN,"%s",fname);
+        char *dot=strrchr(t->title,'.'); if(dot) *dot=0;
+        str_trim(t->title);
     }
-    if(!artist[0]) snprintf(artist,TAGLEN,"%s","Unknown artist");
-    if(!album[0])  snprintf(album, TAGLEN,"%s","Unknown album");
-    if(!genre[0])  snprintf(genre, TAGLEN,"%s","Unknown genre");
+    if(!t->artist[0]) snprintf(t->artist,TAGLEN,"%s","Unknown artist");
+    if(!t->album[0])  snprintf(t->album, TAGLEN,"%s","Unknown album");
+    if(!t->genre[0])  snprintf(t->genre, TAGLEN,"%s","Unknown genre");
+    /* album_artist is left EMPTY when the file has none - musicdb falls back to
+     * ARTIST for grouping, and a fabricated value here would be indistinguishable
+     * from a real one. disc/track stay 0 = unknown, which sorts last. */
     return 1;
 }
 
@@ -552,16 +620,23 @@ static const char *INS_SONG =
     "INSERT INTO SONG (PATH,NAME,TITLE,ALBUM,ARTIST,GENRE,DISC,TRACK,IS_CUE,IS_ISO,IS_DSD,OFFSET,"
     "DURATION,NAME_CODE,TITLE_CODE,ALBUM_CODE,ARTIST_CODE,GENRE_CODE,ADD_TIME,SAMPLE_RATE,"
     "BIT_PER_SAMPLE,CHANNELS,BIT_RATE,SONG_MIMETYPE,SONG_PRODUCTION_YEAR,IS_SELECT,ALBUM_ARTIST,"
-    /* ALBUM_ARTIST -> NULL (not 0): the column is TEXT (stock type); populating it is a follow-up.
-     * IS_M3U/M3U_PATH/ACCENT are omitted from the column list so they take their schema DEFAULTs. */
-    "ALBUM_ARTIST_CODE) VALUES (?,?,?,?,?,?,0,0,0,0,0,0,0,?,?,?,?,?,?,0,0,0,0,'','',0,NULL,0);";
+    /* ALBUM_ARTIST is TEXT (stock type) and binds NULL when the file carries no album
+     * artist - see bind_extra. IS_M3U/M3U_PATH/ACCENT are omitted from the column list
+     * so they take their schema DEFAULTs. */
+    /* EXPLICIT ?N parameters: SQLite numbers a bare '?' by order of appearance, so the
+     * DISC/TRACK placeholders (columns 7-8) would otherwise renumber every bind after
+     * them. Numbering them 13.. keeps bind_tags' contiguous 2..11 block untouched. */
+    "ALBUM_ARTIST_CODE) VALUES (?1,?2,?3,?4,?5,?6,?13,?14,0,0,0,0,0,?7,?8,?9,?10,?11,?12,0,0,0,0,'','',0,?15,?16);";
 /* MERGE (not delete+reinsert): UPDATE an existing PATH's metadata in place so its ID and ACCENT are
  * preserved - MEMORY_PLAY.MUSIC_ID (resume) and MY_LOVE.ID (favourites) are ID-keyed, so a delete+
  * reinsert with fresh autoincrement IDs used to break resume + favourites and wipe the art-accent cache
  * on every rescan. ADD_TIME is intentionally left untouched here (keep the original add time). */
 static const char *UPD_SONG =
-    "UPDATE SONG SET NAME=?,TITLE=?,ALBUM=?,ARTIST=?,GENRE=?,"
-    "NAME_CODE=?,TITLE_CODE=?,ALBUM_CODE=?,ARTIST_CODE=?,GENRE_CODE=? WHERE PATH=?;";
+    "UPDATE SONG SET NAME=?1,TITLE=?2,ALBUM=?3,ARTIST=?4,GENRE=?5,"
+    "NAME_CODE=?6,TITLE_CODE=?7,ALBUM_CODE=?8,ARTIST_CODE=?9,GENRE_CODE=?10,"
+    /* rescanning an existing row must refresh these too, otherwise a library that
+     * was indexed before diskOS read them would keep DISC/TRACK 0 for ever. */
+    "DISC=?12,TRACK=?13,ALBUM_ARTIST=?14,ALBUM_ARTIST_CODE=?15 WHERE PATH=?11;";
 /* per-connection temp table of PATHs seen this scan; drives the post-walk delete of vanished songs. */
 static const char *SEEN_DDL = "CREATE TEMP TABLE IF NOT EXISTS seen(PATH TEXT PRIMARY KEY);";
 static const char *SEEN_INS = "INSERT OR IGNORE INTO seen(PATH) VALUES(?);";
@@ -600,6 +675,20 @@ static void bind_tags(sqlite3_stmt *s, int p0, const char *fname, const char *ti
     sqlite3_bind_int (s, p0+8, code4(artist));
     sqlite3_bind_int (s, p0+9, code4(genre));
 }
+/* Bind DISC/TRACK/ALBUM_ARTIST/ALBUM_ARTIST_CODE at `p0`..`p0+3`.
+ * ALBUM_ARTIST binds NULL (not "") when the file has none, so "absent" stays
+ * distinguishable from "tagged empty" - musicdb's IFNULL handles both. */
+static void bind_extra(sqlite3_stmt *s, int p0, const tags_t *t){
+    sqlite3_bind_int(s, p0+0, t->disc);
+    sqlite3_bind_int(s, p0+1, t->track);
+    if(t->album_artist[0]){
+        sqlite3_bind_text(s, p0+2, t->album_artist, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (s, p0+3, code4(t->album_artist));
+    } else {
+        sqlite3_bind_null(s, p0+2);
+        sqlite3_bind_int (s, p0+3, 0);
+    }
+}
 /* Record a path in `seen` WITHOUT touching its row - used to PRESERVE an existing row for a file we
  * couldn't index this pass (ENOENT / unreadable), so the vanished-row prune doesn't delete it. If we
  * can't even record it, block the prune (conservative: never delete a file we failed to preserve). */
@@ -612,8 +701,8 @@ static void mark_seen(const char *path){
 /* Merge one file into SONG: record it as seen, then UPDATE the existing PATH in place (preserving ID +
  * ACCENT), or INSERT a new row if the PATH is new. Any DB error sets g_scan_err (blocks the commit). */
 static void upsert_song(const char *path, const char *fname){
-    char title[TAGLEN],artist[TAGLEN],album[TAGLEN],genre[TAGLEN];
-    if(!tags_from_file(path, fname, title, artist, album, genre)){
+    tags_t t;
+    if(!tags_from_file(path, fname, &t)){
         mark_seen(path);   /* unreadable this pass -> keep any existing row; don't clobber good tags */
         g_skipped++;
         return;
@@ -624,8 +713,9 @@ static void upsert_song(const char *path, const char *fname){
     if(sqlite3_step(g_seen)!=SQLITE_DONE){ g_scan_err=1; return; }
     /* UPDATE in place (keeps ID/ACCENT/ADD_TIME). params 1..10 = tags, 11 = PATH (WHERE). */
     sqlite3_reset(g_upd); sqlite3_clear_bindings(g_upd);
-    bind_tags(g_upd, 1, fname, title, album, artist, genre);
+    bind_tags(g_upd, 1, fname, t.title, t.album, t.artist, t.genre);
     sqlite3_bind_text(g_upd, 11, path, -1, SQLITE_TRANSIENT);
+    bind_extra(g_upd, 12, &t);                         /* 12=DISC 13=TRACK 14=ALBUM_ARTIST 15=code */
     if(sqlite3_step(g_upd)!=SQLITE_DONE){ g_scan_err=1; return; }
     if(sqlite3_changes(g_db) > 0){                     /* existing PATH updated in place */
         pthread_mutex_lock(&g_mu); g_done++; pthread_mutex_unlock(&g_mu);
@@ -634,8 +724,9 @@ static void upsert_song(const char *path, const char *fname){
     /* new PATH -> INSERT (new autoincrement ID, ACCENT = schema default 0). params: 1=PATH, 2..11 tags, 12=ADD_TIME */
     sqlite3_reset(g_ins); sqlite3_clear_bindings(g_ins);
     sqlite3_bind_text(g_ins, 1, path, -1, SQLITE_TRANSIENT);
-    bind_tags(g_ins, 2, fname, title, album, artist, genre);
+    bind_tags(g_ins, 2, fname, t.title, t.album, t.artist, t.genre);
     sqlite3_bind_int64(g_ins, 12, (sqlite3_int64)1782180000);   /* ADD_TIME */
+    bind_extra(g_ins, 13, &t);                         /* 13=DISC 14=TRACK 15=ALBUM_ARTIST 16=code */
     if(sqlite3_step(g_ins)==SQLITE_DONE){ pthread_mutex_lock(&g_mu); g_done++; pthread_mutex_unlock(&g_mu); }
     else g_scan_err=1;   /* insert failure (disk full, DB corruption) must block the commit */
 }

@@ -24,6 +24,12 @@ Deep to install, thin to run: at runtime we own exactly one process.
   **stock** UI. `main()` normalises `argv[0]`; `ui_restart_self()` passes bare `mq_ui` and re-execs in
   place so the PID never changes. Never add an argv element to the restart - use the environment
   (see `DISKOS_UI_RESTART`).
+- **Holding Vol-Up at boot means "the other UI," not "diskOS."** `main.c`'s boot check is
+  `flag_stock ^ volup` against `/usr/data/boot_default_stock` (present => default is Stock; written
+  only by the Settings -> System -> Default UI toggle, `settings.c`). A **fresh flash has no such
+  file**, so the default is diskOS already - holding Vol-Up on a new flash hands off to STOCK, the
+  opposite of what you'd guess from a device that was previously toggled to default-stock. Plain
+  power-on is the way to reach diskOS on a device that has never had Default UI touched.
 - **Paint from theme tokens.** `th_bg()`, `th_card()`, `th_text()`... never a raw `lv_color_hex()`. A
   literal looks right in whichever palette you developed against and wrong in the other. Fixed brand
   or state colours (Last.fm red, iOS state blue, the user's accent) are the deliberate exception.
@@ -35,6 +41,24 @@ Deep to install, thin to run: at runtime we own exactly one process.
 - **The screen is ROUND, 360x360.** Usable width narrows sharply toward the edges - at y=302 the chord
   is only ~264px. Check any new layout against the chord at its lowest edge, not the bounding box.
 - **Docs are ASCII.** Upstream did a pass converting `...` and dashes; match it.
+- **`RunLock` (`diskos_installer/runlock.py`) is a real `flock`, scoped per-`open()`, not per-process.**
+  A `with RunLock():` nested inside another already-held one in the SAME process still self-deadlocks
+  ("another diskOS installer is already running" against nothing at all). `__main__.py`'s dispatcher
+  takes it generically for every command not in its read-only list; any `cmd_*` handler that ALSO
+  self-locks (like `manager.cmd_backup`, around its mutating branches) must be in that list too -
+  currently `doctor`, `status`, `detect`, `report`, `backup`.
+- **The `make CROSS=` fast check writes an x86-64 binary to `ui/mq_ui` - the exact path
+  `tools/diskos-deploy.sh` pushes by default.** Deploying it cannot work and fails in a way
+  that looks like nothing happened: the device never brings the binary up, the script
+  correctly refuses to prune, and `fiio_init`'s watchdog respawns the **stock** UI. You are
+  then testing stock while believing you are testing your branch - stock has all the
+  original complaints (artists fragmented by "feat.", albums in alphabetical order), so the
+  symptom is "my fixes did nothing". **Run `file ui/mq_ui` and expect `MIPS` before every
+  deploy**, or build the fast check to a different name.
+- **`payload/mq_ui` is stale on purpose-by-accident:** a snapshot from the very first installer commit
+  (`e0bc478`, 2026-08-26), predating every UI fix on this branch. `install`/`diskos-manager install`
+  without an explicit `--ui path/to/fresh/mq_ui` flashes that old binary silently. Always pass `--ui`
+  when testing branch work.
 
 ## Build
 
@@ -53,6 +77,41 @@ cd ui && make CROSS= CFLAGS="-O0 -std=gnu11 -pthread -D_GNU_SOURCE -DLV_CONF_INC
 ```
 
 Adding a `ui/*.c` file means adding it to `APP_SRCS` in `ui/Makefile`.
+
+## Windows host (WSL2)
+
+Bare Windows can't do ANY of the above: no Docker, the mipsel cross-toolchain is Linux ELF regardless,
+and `diskos_installer/runlock.py` refuses Windows outright (the installer needs a real Linux host).
+WSL2 + Docker Engine (skip Docker Desktop, just `apt install docker.io` inside the distro) works,
+driven straight from Windows via `wsl.exe -d <distro> -u <user> -- <cmd>` - no need to open a separate
+WSL terminal. Verified end to end on Ubuntu-on-WSL2 this way: build, native `usbboot`/`mksquashfs`
+tools, and a real mask-ROM flash.
+
+- **Clone into WSL's own filesystem** (e.g. `~/diskos-build`), not `/mnt/c/...` or `/mnt/f/...`.
+  Windows git's `autocrlf` leaves every `.sh` with CRLF, which breaks `set -euo pipefail`/`set -eu`
+  parsing (`invalid option name`, stray `$'\r'`) as soon as a script runs under WSL's bash. A
+  local-path `git clone /mnt/f/diskos ~/diskos-build` re-checks-out from the LF blobs using Linux
+  git's own defaults, fixing it without touching the Windows working tree. It's also faster (native
+  ext4 vs. the 9p bridge) for compiling the vendored LVGL/sqlite3 tree.
+- `install.sh` refuses to run as root, so that clone needs to be owned by your normal WSL user, not
+  root - and `/root` itself blocks non-root traversal, so if you set up as root first (simplest for
+  `apt`/`docker` install), `mv` the clone out from under `/root` and `chown -R` it before running
+  `install.sh` or `diskos-installer`/`diskos-manager`.
+- **USB passthrough** for the mask-ROM flash needs `usbipd-win` on the Windows side (`winget install
+  usbipd`, elevated, one-time). With the device in mask-ROM mode (power off, hold Vol-Down, plug in):
+  `usbipd list` for its BUSID, `usbipd bind --busid <id>` (elevated, one-time per port), then
+  `usbipd attach --wsl --busid <id>` (every session) to hand it to the running WSL instance.
+- **The repo's own `udev/70-diskos-maskrom.rules` will not grant access inside WSL2**, even installed
+  correctly: its `TAG+="uaccess"` needs systemd-logind to see an active *seat*, and WSL2 sessions have
+  none (`loginctl` shows every session with `SEAT -`). Enumeration still works (the node is
+  root:root, mode 0664 = world-readable), so `doctor`/`status` see the device fine, but the actual
+  flash's `usbboot` fails immediately with "Could not open USB device" - a bare-second failure, no
+  actual write attempted, device left untouched. Fix is WSL-local, not a repo change (the shipped
+  rule is correct for a normal desktop with a real seat): add a second rule scoped to the same
+  vendor:product with `MODE="0666"`, then `udevadm control --reload-rules && udevadm trigger`.
+- `wsl.exe -u root --` needs no sudo password, so setup (`apt`, `docker`, the udev fallback above) is
+  all root-doable without any Windows-side elevated prompt beyond the two one-time installs
+  (`wsl --install`, `winget install usbipd`).
 
 ## Test
 
@@ -110,11 +169,49 @@ system with light mode, user fonts, nav-stack fix, UI watchdog, wider audio-form
 scan progress screen, artist->albums, settings categories, expanded Quick Settings, charge limit, USB
 connect handling, plus the installer's manager front end and diagnostics.
 
-**None of it has run on hardware.** Treat every device-facing claim as unverified. Highest-risk areas
-to check first: boot, theme switching, and a rescan.
+**First real-hardware flash happened, and diskOS BOOTS** (device was stock V228 going in; a verified
+restore point is saved). Built via the Docker toolchain inside WSL2 (see above), flashed with
+`--variant public --ui <fresh build>` - a real `usbboot` write, F001 SUCCESS, ~91 minutes, 2 factory
+bad blocks correctly skipped. A plain power-on with no buttons held reaches diskOS, exactly as the
+Vol-Up rule above predicts. Home, Menu, library browsing and playback all work on hardware.
 
-Known gaps worth doing next, in rough order: the scanner never writes `DISC`/`TRACK` (album tracks
-list and play alphabetically), `DURATION`, `ALBUM_ARTIST`, year or bitrate, and binds `ADD_TIME` to a
-hardcoded constant; there is no on-device update path (every UI change is a 60-90 min reflash); no
-folder browser; no play queue. `mq_player` embeds a working AirPlay stack that only needs its trigger
-tag pinned - `docs/RE_CATALOGUE.md` names the exact next step.
+Fixed from the first hardware session (all built + unit-tested, **none confirmed on device yet**):
+
+- `ui/txtfold.c` (new): the Montserrat faces cover U+0020..U+007E and the Source Han CJK fallback
+  starts at U+3001, so **everything between - every curly apostrophe and every accented Latin
+  letter - had no glyph in any font we load** and drew LVGL's placeholder box ("Don<box>t Push Me",
+  and Bjork/Beyonce/Sigur Ros silently mangled the same way). Folded to ASCII on the way in
+  (`ipc.c` metadata, `musicdb.c` rows), never on a file path. Table verified against Unicode NFD.
+- `scanner.c`: now actually parses `ALBUM_ARTIST` (TPE2 / ALBUMARTIST / `aART`) and `DISC`/`TRACK`
+  (TRCK/TPOS, TRACKNUMBER/DISCNUMBER, and MP4's BINARY `trkn`/`disk` atoms). Parsers were refactored
+  to pass one `tags_t*` instead of four `char*` out-params. **Needs a RESCAN to take effect.**
+- `musicdb.c`: Artists group by `ALBUM_ARTIST` when present, else `ARTIST` with a "feat." tail
+  stripped; `mdb_album_songs()` returns DISC/TRACK order replicating the player's own `ORDER_ALBUM`
+  exactly (they MUST agree - a tap is sent as a position in the player's list).
+- `apps.c`: the Menu grid was 2.13 rows tall so a scroll always rested mid-row, AND its bottom edge
+  sat at y=326 where the round screen gives only 210px of chord against a 266px row - the bottom row
+  was clipped by the bezel. Now exactly two rows ending at y=296, with `LV_SCROLL_SNAP_START`.
+- `library.c`: per-view scroll memory, restored on BACK only (forward drills still start at top).
+- `main.c`: volume keys are read straight off the GPB pin (bit 13/14), so the volume bar paints on
+  the key edge instead of waiting for the player's a714 - the player grabs `event0` exclusively and
+  sits on a single press watching for a double-press track skip. **Confirmed faster on device.**
+- `ipc.c`: ignore a `song_duration_time` of 0 for the track already playing (the 0102 mode-change
+  reply re-announces the song with a partial body, snapping the NP ring to the start for a frame).
+  Hypothesis-driven - not yet confirmed against a captured a2 frame.
+
+Still unverified on hardware: theme switching, a library rescan, and everything in the list above
+except the volume fix.
+
+Known gaps worth doing next, in rough order: the scanner still never writes `DURATION`, year or
+bitrate, and binds `ADD_TIME` to a hardcoded constant; there is no on-device update path (every
+PERMANENT UI change is a 60-90 min reflash - `tools/diskos-deploy.sh` covers testing, but S97 reverts
+a hand-deployed binary on the next boot); no folder browser; no play queue; the Library wants a
+separate "Album Artists" axis alongside the raw-ARTIST "Artists" one. `mq_player` embeds a working
+AirPlay stack that only needs its trigger tag pinned - `docs/RE_CATALOGUE.md` names the exact next
+step.
+
+One inherent limit: "play all by artist" sends the player `list_type 2` + a name, and the player
+filters `WHERE ARTIST=?`. An album-artist-grouped row therefore queues fewer tracks than the UI
+lists. Tapping an individual track is fine - `on_song_play` already falls back to the all-songs
+scope when the player's exact list does not contain the song. We cannot change the player's filter
+column, so this is structural.

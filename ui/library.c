@@ -61,6 +61,38 @@ static lv_timer_t *g_fill_timer;
 
 static void library_reload(void);
 
+/* ---- scroll memory ---------------------------------------------------------
+ * library_reload() rebuilds the list from scratch for every view change, which
+ * used to dump you back at the top: scroll a long Artists list, open one, come
+ * back, and you are at "A" again with your place lost.
+ *
+ * So: remember the offset per VIEW on the way out, and restore it when BACK (and
+ * only back) returns to that view. Drilling FORWARD into a view still starts at
+ * the top, which is what you want when the content is different.
+ *
+ * The restore cannot happen in library_reload(): rows stream in asynchronously
+ * (fill_start/fill_cb), so the content is only a screenful tall at that point and
+ * lv_obj_scroll_to_y would clamp to almost nothing. Instead the target is held in
+ * g_want_y and re-applied after each batch until it sticks. */
+static int g_scroll_mem[VIEW_COUNT];   /* last offset seen in each view */
+static int g_pending_restore;          /* armed by BACK, consumed by the next library_reload() */
+static int g_want_y;                   /* >0 while a restore is still being chased */
+
+static void scroll_remember(void){
+    if(g_list && g_view >= 0 && g_view < VIEW_COUNT) g_scroll_mem[g_view] = lv_obj_get_scroll_y(g_list);
+}
+/* Ask for `g_view`'s remembered offset to be restored by the next reload. */
+static void scroll_restore_pending(void){
+    if(g_view >= 0 && g_view < VIEW_COUNT) g_pending_restore = g_scroll_mem[g_view];
+}
+/* Re-apply the pending offset; give up once it sticks (or once the list is short
+ * enough that LVGL clamps us to the same place twice). */
+static void scroll_chase(void){
+    if(g_want_y <= 0 || !g_list) return;
+    lv_obj_scroll_to_y(g_list, g_want_y, LV_ANIM_OFF);
+    if(lv_obj_get_scroll_y(g_list) >= g_want_y) g_want_y = 0;   /* reached it */
+}
+
 static char first_letter(const char *s){
     while(*s==' ') s++;
     char c = toupper((unsigned char)*s);
@@ -209,6 +241,7 @@ static void group_cb(lv_event_t *e){
     if(lv_event_get_code(e)!=LV_EVENT_SHORT_CLICKED) return;
     int gi=(int)(uintptr_t)lv_event_get_user_data(e);
     g_deeplink=0;   /* normal in-library drill: back returns to the category list */
+    scroll_remember();   /* so BACK lands where you left this list */
     if(g_view==VIEW_ARTISTS){
         /* Artists used to jump straight to a flat list of every track the artist
          * appears on - no album structure at all, the same complaint people had about
@@ -254,31 +287,35 @@ static void group_play_cb(lv_event_t *e){
 }
 static void menu_cb(lv_event_t *e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
+    scroll_remember();
     g_view=(int)(uintptr_t)lv_event_get_user_data(e);
+    /* entering a category from the menu is a FORWARD move: start at the top */
+    if(g_view >= 0 && g_view < VIEW_COUNT) g_scroll_mem[g_view] = 0;
     g_drill_kind=0; g_artist[0]=0; library_reload();
 }
 /* Step one level back WITHIN the library (drill-in -> its category list -> the
  * category menu). Returns 1 if it handled an internal step, 0 if already at the
  * top menu (so the caller should leave the Library screen). */
 int library_back(void){
+    scroll_remember();
     if(g_view==VIEW_GROUP){
         if(g_deeplink){  /* opened from the hub -> leave Library entirely (back to hub) */
             g_deeplink=0; g_view=VIEW_MENU; g_drill_kind=0; g_artist[0]=0; library_reload(); return 0;
         }
         if(g_artist[0]){    /* inside an artist: step back to THEIR albums, not the A-Z */
-            g_view=VIEW_ARTIST_ALBUMS; g_drill_kind=0; library_reload(); return 1;
+            g_view=VIEW_ARTIST_ALBUMS; g_drill_kind=0; scroll_restore_pending(); library_reload(); return 1;
         }
         g_view=(g_drill_kind==1)?VIEW_ALBUMS:(g_drill_kind==3)?VIEW_GENRES:VIEW_ARTISTS;
-        g_drill_kind=0; library_reload(); return 1;
+        g_drill_kind=0; scroll_restore_pending(); library_reload(); return 1;
     }
     if(g_view==VIEW_ARTIST_ALBUMS){
         if(g_deeplink){  /* opened from the hub -> leave the Library entirely */
             g_deeplink=0; g_view=VIEW_MENU; g_artist[0]=0; library_reload(); return 0;
         }
-        g_artist[0]=0; g_view=VIEW_ARTISTS; library_reload(); return 1;
+        g_artist[0]=0; g_view=VIEW_ARTISTS; scroll_restore_pending(); library_reload(); return 1;
     }
-    if(g_view==VIEW_MOSTPLAYED || g_view==VIEW_RECENT){ g_view=VIEW_HISTORY; library_reload(); return 1; }  /* stats -> History */
-    if(g_view!=VIEW_MENU){ g_view=VIEW_MENU; library_reload(); return 1; }
+    if(g_view==VIEW_MOSTPLAYED || g_view==VIEW_RECENT){ g_view=VIEW_HISTORY; scroll_restore_pending(); library_reload(); return 1; }  /* stats -> History */
+    if(g_view!=VIEW_MENU){ g_view=VIEW_MENU; scroll_restore_pending(); library_reload(); return 1; }
     return 0;
 }
 static void back_cb(lv_event_t *e){
@@ -345,7 +382,8 @@ static void fill_stop(void){ if(g_fill_timer){ lv_timer_del(g_fill_timer); g_fil
 static void fill_cb(lv_timer_t *t){
     int end = g_fill_i + 40; if(end > g_fill_n) end = g_fill_n;
     for(; g_fill_i < end; g_fill_i++) add_row(g_fill_i);
-    if(g_fill_i >= g_fill_n) fill_stop();
+    scroll_chase();                       /* content just grew - try the restore again */
+    if(g_fill_i >= g_fill_n){ fill_stop(); g_want_y = 0; }   /* all rows in: stop chasing */
     (void)t;
 }
 static void fill_start(int n){
@@ -353,7 +391,9 @@ static void fill_start(int n){
     g_fill_n = n; g_fill_i = 0;
     int first = n < 18 ? n : 18;                 /* first screenful, instantly */
     for(; g_fill_i < first; g_fill_i++) add_row(g_fill_i);
+    scroll_chase();
     if(g_fill_i < g_fill_n) g_fill_timer = lv_timer_create(fill_cb, 16, NULL);
+    else g_want_y = 0;                       /* whole list rendered in one go */
 }
 static void fill_flush(void){                    /* render the rest now (before a jump) */
     for(; g_fill_i < g_fill_n; g_fill_i++) add_row(g_fill_i);
@@ -482,7 +522,13 @@ static void library_reload(void){
     lv_obj_clean(g_list);
     g_count = 0;
     g_has_header = 0;
-    lv_obj_scroll_to_y(g_list, 0, LV_ANIM_OFF);
+    lv_obj_scroll_to_y(g_list, 0, LV_ANIM_OFF);   /* clean slate; scroll_chase() walks
+                                                   * back down to g_want_y as rows arrive */
+    /* Consume the armed restore HERE, so it belongs to exactly one reload. Without
+     * this a chase that never finished (navigated away mid-fill) would still be live
+     * on the NEXT reload and yank a freshly-drilled-into list to a stale offset. */
+    g_want_y = g_pending_restore;
+    g_pending_restore = 0;
 
     const char *ttl = (g_view==VIEW_GROUP)        ? g_drill
                     : (g_view==VIEW_ARTIST_ALBUMS) ? g_artist

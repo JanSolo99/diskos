@@ -210,8 +210,11 @@ def _run(args):
         return manager.menu(args)
     # Read-only commands take no lock: they must stay usable while a flash runs in
     # another window (checking on it is the obvious thing to want), and `report` in
-    # particular has to work WHILE something is stuck.
-    if args.cmd in ("doctor", "status", "detect", "report"):
+    # particular has to work WHILE something is stuck. `backup` never touches the
+    # device either and already takes RunLock itself around each mutating branch
+    # (manager.cmd_backup) - locking here too self-deadlocks, since flock is scoped
+    # per-open-file-description rather than per-process.
+    if args.cmd in ("doctor", "status", "detect", "report", "backup"):
         return args.func(args)
     with RunLock():
         return args.func(args)

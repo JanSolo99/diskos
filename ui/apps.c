@@ -134,13 +134,24 @@ void apps_create(lv_obj_t *root){
 
     g_list = lv_obj_create(root);
     lv_obj_remove_style_all(g_list);
-    lv_obj_set_pos(g_list, 44, 74); lv_obj_set_size(g_list, 272, 252);
+    /* Viewport height is EXACTLY two tile rows (108 + 10 + 108 = 226), and it stops at
+     * y=296. Both numbers are load-bearing on a round screen:
+     *
+     *  - 252px tall was 2.13 rows, so a scroll almost always came to rest with the top
+     *    row sliced in half and the bottom row sliced again - the "buttons are cut off"
+     *    report. Snapping to a whole row (below) only works if the viewport IS whole rows.
+     *  - the old bottom edge (74+252 = y=326) has just 210px of chord on the 360px
+     *    circle, but a row of tiles is 266px wide, so the bottom row was ALSO being
+     *    clipped by the bezel, not merely by the container. y=296 is the lowest line
+     *    where the chord (275px) still clears a full row. */
+    lv_obj_set_pos(g_list, 44, 70); lv_obj_set_size(g_list, 272, 226);
     lv_obj_set_style_bg_opa(g_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_row(g_list, 10, 0);
     lv_obj_set_style_pad_column(g_list, 10, 0);
     lv_obj_set_flex_flow(g_list, LV_FLEX_FLOW_ROW_WRAP);   /* 2-wide tile grid (128px tiles + 10 gap) */
     lv_obj_set_flex_align(g_list, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scroll_dir(g_list, LV_DIR_VER);
+    lv_obj_set_scroll_snap_y(g_list, LV_SCROLL_SNAP_START);  /* always rest on a row boundary */
     lv_obj_set_scrollbar_mode(g_list, LV_SCROLLBAR_MODE_OFF);
 
     apps_reload();

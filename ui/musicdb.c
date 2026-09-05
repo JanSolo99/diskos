@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "musicdb.h"
+#include "txtfold.h"
 #include "sqlite3.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -151,6 +152,69 @@ static const char *colt(sqlite3_stmt *st, int i){
     return t ? t : "";
 }
 
+/* Every row that reaches a label goes through here: trim the tag whitespace, then
+ * fold the codepoints no font we load can draw (see txtfold.h - this is what turns
+ * a curly apostrophe from a black box into "'"). Folding on READ rather than at scan
+ * time means an existing library is fixed without waiting for a rescan. */
+static void song_norm(mdb_song_t *s){
+    trim(s->title); trim(s->artist); trim(s->album); trim(s->genre); trim(s->album_artist);
+    txt_fold_ascii(s->title); txt_fold_ascii(s->artist);
+    txt_fold_ascii(s->album); txt_fold_ascii(s->genre);
+    txt_fold_ascii(s->album_artist);
+}
+
+/* The string an artist row is GROUPED by: ALBUM_ARTIST when the file has one, else
+ * ARTIST. This is what stops one artist fragmenting into a row per collaborator - a
+ * typical rip tags every track ARTIST="50 Cent feat. <someone>" but ALBUM_ARTIST=
+ * "50 Cent", so grouping on ARTIST listed "50 Cent", "50 Cent feat. Eminem" and
+ * "50 Cent feat. Lloyd Banks" as three different artists. */
+static const char *song_group_src(const mdb_song_t *s){
+    return s->album_artist[0] ? s->album_artist : s->artist;
+}
+
+/* Cut a trailing "feat. X" / "ft X" / "featuring X" / "f/ X" off an artist name.
+ * Used ONLY on the ARTIST fallback: a file that carries an album artist is already
+ * authoritative and is never rewritten. The separator has to FOLLOW A SPACE, so a
+ * name that merely contains the letters (Daft Punk, Left Field) is left alone. */
+static void strip_featuring(char *s){
+    static const char *const SEP[] = { "feat.", "feat ", "featuring", "ft.", "ft ", "f/" };
+    int seen = 0;                    /* only ever cut AFTER a real name: a malformed
+                                      * " feat. X" must not truncate to "" and drop the
+                                      * song out of the Artists list entirely. */
+    for(char *p = s; *p; p++){
+        if(*p != ' '){ seen = 1; continue; }
+        if(!seen) continue;
+        for(unsigned k = 0; k < sizeof SEP / sizeof SEP[0]; k++)
+            if(!strncasecmp(p+1, SEP[k], strlen(SEP[k]))){ *p = 0; return; }
+    }
+}
+
+/* Split one song's grouping name into individual artists - the comma/semicolon split
+ * the Artists list has always done, applied to the ALBUM_ARTIST-preferred source. */
+static int song_artist_toks(const mdb_song_t *s, char toks[][MDB_STR], int cap){
+    char key[MDB_STR];
+    snprintf(key, MDB_STR, "%s", song_group_src(s));
+    if(!s->album_artist[0]) strip_featuring(key);
+    trim(key);
+    return mdb_split_artists(key, toks, cap);
+}
+
+/* The player's album ORDER BY, replicated exactly (see ORDER_ALBUM in mdb_play_pos):
+ * an unknown disc/track (0) sorts LAST, then by title. The list on screen and the
+ * queue the player builds MUST agree - if they disagree, tapping track 5 starts a
+ * different song, because a tap is sent as a POSITION in the player's own list. */
+static int mdb_track_cmp(const void *a, const void *b){
+    const mdb_song_t *x = *(const mdb_song_t *const *)a;
+    const mdb_song_t *y = *(const mdb_song_t *const *)b;
+    int xu = x->disc ? 0 : 1, yu = y->disc ? 0 : 1;
+    if(xu != yu)             return xu - yu;
+    if(x->disc != y->disc)   return x->disc - y->disc;
+    xu = x->track ? 0 : 1;   yu = y->track ? 0 : 1;
+    if(xu != yu)             return xu - yu;
+    if(x->track != y->track) return x->track - y->track;
+    return strcasecmp(x->title, y->title);
+}
+
 int mdb_load(void){
     g_n = 0; g_load_err = 0;
     groups_free();                 /* library reloaded -> drop cached Artists/Albums/Genres */
@@ -174,7 +238,8 @@ int mdb_load(void){
     sqlite3_stmt *st;
     const char *sql =
         "SELECT IFNULL(TITLE,IFNULL(NAME,'Untitled')),IFNULL(ARTIST,''),IFNULL(ALBUM,''),"
-        "IFNULL(DURATION,0),ID,IFNULL(GENRE,'') FROM SONG ORDER BY 1 COLLATE NOCASE;";
+        "IFNULL(DURATION,0),ID,IFNULL(GENRE,''),IFNULL(ALBUM_ARTIST,''),"
+        "IFNULL(DISC,0),IFNULL(TRACK,0) FROM SONG ORDER BY 1 COLLATE NOCASE;";
     if(sqlite3_prepare_v2(d, sql, -1, &st, NULL) != SQLITE_OK){ g_load_err = 1; return 0; }
     int rc = SQLITE_DONE;
     while(g_n < g_cap && (rc = sqlite3_step(st)) == SQLITE_ROW){
@@ -185,7 +250,10 @@ int mdb_load(void){
         s->dur_ms = sqlite3_column_int(st,3);
         s->id     = sqlite3_column_int(st,4);
         snprintf(s->genre,  MDB_STR, "%s", colt(st,5));
-        trim(s->title); trim(s->artist); trim(s->album); trim(s->genre);
+        snprintf(s->album_artist, MDB_STR, "%s", colt(st,6));
+        s->disc   = sqlite3_column_int(st,7);
+        s->track  = sqlite3_column_int(st,8);
+        song_norm(s);
     }
     /* rc==ROW means we stopped only because the buffer filled (more rows than COUNT -> a benign
      * add-between-queries race, not an error). Anything other than ROW/DONE is a mid-query
@@ -281,6 +349,8 @@ int mdb_current_play(mdb_song_t *out, int *pos_ms, int *is_playing){
             snprintf(out->album,  MDB_STR, "%s", colt(st,2));
             out->dur_ms = sqlite3_column_int(st,3);
             out->id     = sqlite3_column_int(st,4);
+            out->genre[0] = 0; out->album_artist[0] = 0; out->disc = out->track = 0;
+            song_norm(out);
         }
         if(pos_ms) *pos_ms = pos;
         if(is_playing) *is_playing = play;
@@ -360,7 +430,7 @@ int mdb_albums(char names[][MDB_STR], char artists[][MDB_STR], int *counts, int 
         mdb_ai_t *tmp = malloc((size_t)(g_n>0?g_n:1) * sizeof *tmp);
         if(!tmp) return 0;                                   /* transient OOM: don't cache, retry later */
         int m = 0;
-        for(int i=0;i<g_n;i++) if(g_songs[i].album[0]){ tmp[m].al=g_songs[i].album; tmp[m].ar=g_songs[i].artist; m++; }
+        for(int i=0;i<g_n;i++) if(g_songs[i].album[0]){ tmp[m].al=g_songs[i].album; tmp[m].ar=song_group_src(&g_songs[i]); m++; }
         qsort(tmp, (size_t)m, sizeof *tmp, mdb_ai_cmp);      /* sort by album, then group adjacent */
         int n = 0;
         for(int i=0;i<m;i++){
@@ -424,7 +494,7 @@ int mdb_artists(char names[][MDB_STR], int cap){
          * ',' / ';' capped at 8/song, so count separators (+1), capped at 8. */
         long maxtok = 0;
         for(int i=0;i<g_n;i++){
-            int c=1; for(const char *p=g_songs[i].artist; *p; p++) if(*p==','||*p==';') c++;
+            int c=1; for(const char *p=song_group_src(&g_songs[i]); *p; p++) if(*p==','||*p==';') c++;
             maxtok += c>8?8:c;
         }
         char (*buf)[MDB_STR] = malloc((size_t)(maxtok>0?maxtok:1) * MDB_STR);
@@ -432,7 +502,7 @@ int mdb_artists(char names[][MDB_STR], int cap){
         int n = 0;
         for(int i=0;i<g_n;i++){
             char toks[8][MDB_STR];
-            int t = mdb_split_artists(g_songs[i].artist, toks, 8);
+            int t = song_artist_toks(&g_songs[i], toks, 8);
             for(int k=0;k<t && n<maxtok;k++)
                 if(toks[k][0]) snprintf(buf[n++], MDB_STR, "%s", toks[k]);
         }
@@ -488,6 +558,9 @@ int mdb_album_songs(const char *album, const mdb_song_t **out, int cap){
     int n = 0;
     for(int i=0;i<g_n && n<cap;i++)
         if(!strcasecmp(g_songs[i].album, album)) out[n++] = &g_songs[i];
+    /* g_songs is title-ordered (mdb_load's ORDER BY), which listed - and played -
+     * an album alphabetically. Re-sort into the player's own album order. */
+    qsort(out, (size_t)n, sizeof *out, mdb_track_cmp);
     return n;
 }
 
@@ -495,7 +568,7 @@ int mdb_artist_songs(const char *artist, const mdb_song_t **out, int cap){
     int n = 0;
     for(int i=0;i<g_n && n<cap;i++){
         char toks[8][MDB_STR];
-        int t = mdb_split_artists(g_songs[i].artist, toks, 8);
+        int t = song_artist_toks(&g_songs[i], toks, 8);
         for(int k=0;k<t;k++) if(!strcasecmp(toks[k], artist)){ out[n++] = &g_songs[i]; break; }
     }
     return n;
@@ -518,7 +591,7 @@ int mdb_artist_albums(const char *artist, char names[][MDB_STR], int *counts, in
     for(int i=0;i<g_n;i++){
         if(!g_songs[i].album[0]) continue;
         char toks[8][MDB_STR];
-        int t = mdb_split_artists(g_songs[i].artist, toks, 8);
+        int t = song_artist_toks(&g_songs[i], toks, 8);
         for(int k=0;k<t;k++)
             if(!strcasecmp(toks[k], artist)){ tmp[m++] = g_songs[i].album; break; }
     }
@@ -558,8 +631,8 @@ int mdb_favorites(mdb_song_t *out, int cap){
         snprintf(s->album,  MDB_STR, "%s", colt(st,2));
         s->dur_ms = sqlite3_column_int(st,3);
         s->id     = sqlite3_column_int(st,4);
-        s->genre[0] = 0;
-        trim(s->title); trim(s->artist); trim(s->album);
+        s->genre[0] = 0; s->album_artist[0] = 0; s->disc = s->track = 0;
+        song_norm(s);
     }
     sqlite3_finalize(st); return n;
 }
@@ -599,8 +672,8 @@ static int mdb_stats_list(mdb_song_t *out, int cap, int by_recent){
         snprintf(s->album,  MDB_STR, "%s", colt(st,2));
         s->dur_ms = sqlite3_column_int(st,3);
         s->id     = sqlite3_column_int(st,4);
-        s->genre[0] = 0;
-        trim(s->title); trim(s->artist); trim(s->album);
+        s->genre[0] = 0; s->album_artist[0] = 0; s->disc = s->track = 0;
+        song_norm(s);
     }
     sqlite3_finalize(st); return n;
 }
@@ -751,9 +824,10 @@ int mdb_playlist_songs(long pid, mdb_song_t *out, int cap){
     while(n<cap && sqlite3_step(st) == SQLITE_ROW){
         snprintf(out[n].title,  MDB_STR, "%s", colt(st,0));
         snprintf(out[n].artist, MDB_STR, "%s", colt(st,1));
-        out[n].album[0]=0; out[n].genre[0]=0;
+        out[n].album[0]=0; out[n].genre[0]=0; out[n].album_artist[0]=0;
+        out[n].disc = out[n].track = 0;
         out[n].dur_ms = sqlite3_column_int(st,2); out[n].id = 0;
-        trim(out[n].title); trim(out[n].artist);
+        song_norm(&out[n]);
         n++;
     }
     sqlite3_finalize(st);

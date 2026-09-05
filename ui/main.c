@@ -1029,6 +1029,45 @@ static void polls_set_paused(int paused){
 /* Bounded external command, exposed so saver.c can decode the vinyl cover without an unbounded popen. */
 int ui_run_bounded(char *const argv[], int timeout_ms){ return run_bounded(argv, timeout_ms); }
 
+/* ---- hardware volume keys: immediate on-screen acknowledgement -------------
+ * We never see the volume keys through the input layer - mq_player holds an
+ * EXCLUSIVE grab on /dev/input/event0 (see the boot-time note in main()), and it
+ * owns what a press means: it also watches for a double-press to skip a track, so
+ * it deliberately sits on a single press for a moment before acting on it. The
+ * only notification we get is the a714 frame it emits AFTER all of that, which is
+ * why the volume overlay lagged the button - every press paid the player's
+ * hold-off before anything at all appeared on screen.
+ *
+ * So sample the pin level ourselves, exactly as the boot-time Vol-Up override
+ * does: x2000 pinctrl @ 0x10010000, GPB PxPIN at +0x00 of the port (port B is at
+ * +0x100), active-low, bit 13 = Vol-Up and bit 14 = Vol-Down. That register map
+ * was validated on-device 2026-08-13 against known-released states.
+ *
+ * This is one volatile read of an already-mapped page per loop - no syscall and
+ * nothing that can block the LVGL thread. We only make the bar APPEAR sooner; the
+ * real level still comes from the a714 and corrects the number a moment later. */
+static volatile uint32_t *g_gpb_pin;   /* GPB PxPIN, or NULL when /dev/mem is unavailable */
+static int g_volkey_down;              /* last sample: 1 while either volume key is held */
+
+static void volkeys_init(void){
+    int fd = open("/dev/mem", O_RDONLY | O_SYNC);
+    if(fd < 0) return;                 /* no /dev/mem -> feature simply off, a714 still drives the bar */
+    void *map = mmap(NULL, 4096, PROT_READ, MAP_SHARED, fd, 0x10010000);
+    close(fd);                         /* the mapping outlives the descriptor */
+    if(map == MAP_FAILED) return;
+    g_gpb_pin = (volatile uint32_t *)((char *)map + 0x100);
+}
+/* 1 on a press EDGE of either volume key, 0 otherwise. A HELD key (auto-repeat)
+ * reports one edge; the a714 stream keeps the number moving after that. */
+static int volkeys_pressed(void){
+    if(!g_gpb_pin) return 0;
+    uint32_t pin = *g_gpb_pin;
+    int down = (((pin >> 13) & 1u) == 0) || (((pin >> 14) & 1u) == 0);   /* active low */
+    int edge = down && !g_volkey_down;
+    g_volkey_down = down;
+    return edge;
+}
+
 /* ---- rim (circumference) scroll -------------------------------------------
  * Drag a finger around the screen EDGE to fly through long lists, like a crown.
  * State machine IDLE->CANDIDATE->OWNED:
@@ -1512,6 +1551,7 @@ int main(int argc, char **argv){
     lv_timer_create(hwclock_save_tick, 300000, NULL); /* write system time back to the RTC every 5 min */
     lv_timer_create(clock_tick, 10000, NULL);   /* refresh wall clock every 10s */
     clock_tick(NULL);                           /* set immediately */
+    volkeys_init();                              /* map GPB so a volume press paints the bar without waiting on the player */
     g_t_status = lv_timer_create(status_poll_cb, 3000, NULL); /* charging/battery/wifi every 3s (BT every ~12s inside); paused at screen-off */
     status_poll_cb(NULL);                        /* populate immediately */
     bt_boot_restore();                           /* re-enable BT + arm auto-route if it was on (persist like WiFi) */
@@ -1668,10 +1708,16 @@ int main(int argc, char **argv){
          * set a volume, power OFF with the button, power ON -> should return to that volume. */
         /* volume change (hardware buttons -> player -> a714 frame): show the bar,
          * count it as activity, and wake the screen so the bar is visible. */
-        if(st.volume_seq != last_vol_seq){
-            last_vol_seq = st.volume_seq;
+        int volkey_edge  = volkeys_pressed();
+        int vol_changed   = (st.volume_seq != last_vol_seq);
+        if(vol_changed) last_vol_seq = st.volume_seq;
+        /* A real volume change (a714) wakes the screen, as it always did. A bare KEY
+         * EDGE only paints the bar on an already-lit screen - deliberately not a wake
+         * source, so double-pressing Vol-Up to skip a track in a pocket cannot light
+         * the panel (the player emits no a714 for a skip, so today it stays dark). */
+        if(vol_changed || (volkey_edge && !bl_state)){
             last_activity = lv_tick_get();
-            if(bl_state){ ui_backlight(ui_get_brightness()); bl_state = 0; }
+            if(vol_changed && bl_state){ ui_backlight(ui_get_brightness()); bl_state = 0; }
             if(screen_current()==SCR_SAVER) screen_back();
             ui_show_volume(st.volume);
         }
