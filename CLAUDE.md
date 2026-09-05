@@ -43,6 +43,11 @@ vendored blobs that must not be edited: LVGL at `ui/lvgl/` and the SQLite amalga
 `library.c` (830) the Library browser: category menu, Songs / Albums / Artists / Album
 Artists / Genres / Playlists / Favourites / History, drill-in, the A-Z scrubber, per-view
 scroll memory. `apps.c` (160) the Menu tile grid (swipe left from Home).
+`queue.c` (165) is the queue VIEW opened from Now Playing -> swipe right -> Queue. It is
+READ-ONLY: it reconstructs the player's current list scope from the local database and sends
+1-based positions, so queue rows must stay in the exact order the player uses or a tap starts
+the wrong track. It cannot add, reorder or remove anything - see `docs/QUEUE_DESIGN.md`.
+`SCR_QUEUE` is appended to the screen enum and the file must stay in `APP_SRCS`.
 `settings.c` (780) the whole Settings tree, driven by one table (see the recipe below).
 `search.c` `songinfo.c` `npmenus.c` (Now Playing side panels) `eqcustom.c` (10-band EQ)
 `colorpick.c` (accent picker) `modes.c` (audio source) `playlistview.c` `quicksettings.c`
@@ -404,6 +409,7 @@ own verdict.
 
 ## Reference
 
+`docs/QUEUE_DESIGN.md` (the play queue: three routes and the probe that picks one),
 `docs/RE_CATALOGUE.md` (what is decoded, what is not), `docs/COMMAND_MAP.md` (IPC tags),
 `docs/HARDWARE.md` (probed hardware + a gap table), `docs/DEV_WORKFLOW.md`, `ui/README.md`
 (theming and font contract).
@@ -473,6 +479,16 @@ on hardware is spelled out after the list):
   for press/release/long-press remain stock-player behavior, so this is a wake notification only.
   Built and pushed as commit `b02da75`; hardware confirmation of the direct power-button wake is
   still pending.
+- `queue.c` (uncommitted): the Now Playing queue screen reconstructs all-songs, artist, album,
+  genre, playlist and favourites scopes from `musicdb.c`, displays 1-based positions, and jumps
+  with the same list type, name and position. Targetless group-play can use its pending scope once
+  the player rebuild completes. The backing storage grows to the actual song count; do not restore
+  the old fixed 4096-entry limit. The queue work is not yet committed or hardware-tested.
+- Warning cleanup (uncommitted): compiler warning fixes cover misleading indentation, nested
+  comments, unused helpers, format truncation, and bounded copies in app/path/weather/session-key
+  handling. The latest Docker build produced a warning-free MIPS binary; verify architecture with
+  `file ui/mq_ui` before deployment. The weather Menu tile now uses a cloud/sun icon instead of
+  the old eye icon.
 - `ipc.c`: ignore a `song_duration_time` of 0 for the track already playing (the 0102 mode-change
   reply re-announces the song with a partial body, snapping the NP ring to the start for a frame).
   Hypothesis-driven - not yet confirmed against a captured a2 frame.
@@ -491,7 +507,7 @@ on hardware is spelled out after the list):
   hypotheses, not diagnoses: none was reproduced against that exact build, and none of the
   fixes has been on hardware yet. Re-test before assuming any of the three is closed.
 - Never yet exercised on device: theme switching, a library rescan, the menu-grid layout, the
-  scroll memory, the Now Playing progress-flash fix, and the new power-key wake path.
+  scroll memory, the Now Playing progress-flash fix, the new power-key wake path, or the queue.
 
 The honest summary: the deploy path is proven, the volume fix is proven, and the power-key wake
 path is built and pushed but needs hardware confirmation. Library ordering fixes still require one
@@ -501,9 +517,11 @@ album metadata/database ordering rather than Sequential mode.
 Known gaps worth doing next, in rough order: the scanner still never writes `DURATION`, year or
 bitrate, and binds `ADD_TIME` to a hardcoded constant; there is no on-device update path (every
 PERMANENT UI change is a 60-90 min reflash - `tools/diskos-deploy.sh` covers testing, but S97 reverts
-a hand-deployed binary on the next boot); no folder browser; no play queue. `mq_player` embeds a
-working AirPlay stack that only needs its trigger tag pinned - `docs/RE_CATALOGUE.md` names the
-exact next step.
+a hand-deployed binary on the next boot); no folder browser. **There is a queue VIEW but no way to
+QUEUE anything** - `queue.c` is a read-only mirror of the list the player already built, with
+tap-to-jump. Add-to-queue / play-next / reorder do not exist; `docs/QUEUE_DESIGN.md` specs them and
+the probe that decides which of three routes to take. Do not start that work before the probe. `mq_player` embeds a working AirPlay stack that only
+needs its trigger tag pinned - `docs/RE_CATALOGUE.md` names the exact next step.
 
 Runtime text that is still NOT folded, and will still show boxes if it contains anything outside
 ASCII: Wi-Fi SSIDs (`wifi.c`), Bluetooth device names (`bt.c`), fetched lyrics (`lyrics.c`),
@@ -514,4 +532,8 @@ One inherent limit: "play all by artist" sends the player `list_type 2` + a name
 filters `WHERE ARTIST=?`. An album-artist-grouped row therefore queues fewer tracks than the UI
 lists. Tapping an individual track is fine - `on_song_play` already falls back to the all-songs
 scope when the player's exact list does not contain the song. We cannot change the player's filter
-column, so this is structural.
+column, so this is structural. If Album Artists shows the correct names but Play All omits tracks,
+do not change the album-artist grouping or invent an IPC tag: this is the stock player's filter
+contract, not a database reload failure. The earlier blank Album Artists rows were a UI switch
+omission and were fixed in `6f6bf9c`; a genuine data miss says "No artists found" rather than
+showing blank rows.
