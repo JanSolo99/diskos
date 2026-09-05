@@ -16,6 +16,12 @@
 #   DISKOS_IP=<ip> DISKOS_PW=<debug-mode-password> ./diskos-probe.sh            # read-only
 #   DISKOS_IP=... DISKOS_PW=... ./diskos-probe.sh --marker [ROWID]              # P2 test
 #   DISKOS_IP=... DISKOS_PW=... ./diskos-probe.sh --append <WORD>               # P2b test
+#   DISKOS_IP=... DISKOS_PW=... ./diskos-probe.sh --watch [SECS]                 # P2c, automatic
+#
+# --watch is the test that needs no one looking at the screen. The player writes its
+# position to MEMORY_PLAY.MUSIC_ID as it advances, so polling that says exactly which
+# LIST_SONG_0 row it moved to. Append a row, run --watch, let the queue reach the end:
+# if MUSIC_ID lands on the appended row, the player is reading the live table.
 #
 # --append takes ONE WORD, matched as a LIKE substring against SONG.TITLE. ssh
 # flattens its argument list, so a multi-word title would arrive split; pick a
@@ -41,6 +47,7 @@ MODE="read"
 ARG=""
 case "${1:-}" in
   --marker) MODE="marker"; ARG="${2:-}" ;;
+  --watch)  MODE="watch";  ARG="${2:-90}" ;;
   --append) MODE="append"; ARG="${2:?--append needs a track TITLE that is NOT in the current queue}" ;;
   "")       ;;
   *)        echo "unknown option: $1" >&2; exit 2 ;;
@@ -208,6 +215,35 @@ if [ "$MODE" = "append" ]; then
   echo "  It carries on into the appended track -> we can build a real queue (Route B)."
   echo "  It stops / wraps instead           -> the end of the list was decided at build time."
   echo "To undo: play anything from the Library."
+fi
+
+if [ "$MODE" = "watch" ]; then
+  SECS="$ARG"
+  [ -z "$SECS" ] && SECS=90
+  echo
+  echo "--- 5. WATCH: follow the player through the queue (no screen needed) --"
+  echo "The player stamps its position into MEMORY_PLAY.MUSIC_ID as it advances, so"
+  echo "this reads out which LIST_SONG_0 row it actually moved to. Prints only on"
+  echo "CHANGE, for ${SECS}s. Let tracks finish (or skip) while it runs."
+  echo
+  echo "  If it reaches a row you APPENDED  -> the player re-reads the table. Route B."
+  echo "  If it stops at the old last row   -> the list was fixed when it was built."
+  echo
+  i=0
+  last=""
+  while [ "$i" -lt "$SECS" ]; do
+    row=$(q "SELECT m.MUSIC_ID||'  TRACK='||IFNULL(m.TRACK,'-')||'  row-by-ID='||IFNULL(l.TITLE,'<NO SUCH ID>') FROM MEMORY_PLAY m LEFT JOIN LIST_SONG_0 l ON l.ID=m.MUSIC_ID;")
+    if [ "$row" != "$last" ]; then
+      echo "  t+${i}s   MUSIC_ID=$row"
+      last="$row"
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  echo "  watch finished (${SECS}s)."
+  echo
+  echo "queue as it stands now:"
+  q "SELECT '  ID='||ID||'  TRACK='||IFNULL(TRACK,'-')||'  '||IFNULL(TITLE,'-') FROM LIST_SONG_0 ORDER BY ID;"
 fi
 
 echo
