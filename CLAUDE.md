@@ -170,12 +170,18 @@ cd ui && make CROSS= CFLAGS="-O0 -std=gnu11 -pthread -D_GNU_SOURCE -DLV_CONF_INC
   LDLIBS="-lm -lrt -lcrypt" mq_ui
 ```
 
-**Order matters between those two.** The fast check writes an x86-64 `ui/mq_ui` and x86
-`.o` files all through the tree; run the Docker build after it without clearing them and the
-MIPS link dies with `Relocations in generic ELF (EM: 62)` / `file in wrong format`. Always:
+**The tree holds objects for ONE architecture at a time, and `make` cannot tell.** Both
+builds write `.o` files next to the sources, so switching between them in EITHER direction
+fails at the link step on the leftovers:
+
+- cross build after a native one: `relocations in generic ELF (EM: 62)` - EM 62 is x86-64
+- native build after a cross one: `relocations in generic ELF (EM: 8)` - EM 8 is MIPS
+
+Both say `file in wrong format` and neither mentions architecture, so it reads as a broken
+toolchain rather than stale output. Clean before EVERY switch, in either direction:
 
 ```sh
-cd ui && find . -name '*.o' -delete && rm -f mq_ui     # before EVERY cross build
+cd ui && find . -name '*.o' -delete && rm -f mq_ui
 ```
 
 Adding a `ui/*.c` file means adding it to `APP_SRCS` in `ui/Makefile`.
@@ -293,7 +299,15 @@ Append one row to the table in `settings.c` (fields, in order):
 3. Add it to `CATS[]` / `CATV[]` in the `VIEW_MENU` branch to get a menu row.
 4. Add an `else if(g_view==VIEW_YOURS)` branch in `library_reload()` that fills `g_gnames`
    (or `g_buf`), sets `g_count`, and calls `fill_start(n)`.
-5. Handle it in `library_back()` so Back leaves it correctly.
+5. **Add a `case VIEW_YOURS:` to the switch in `add_row()`** - the one that actually draws
+   each row. That switch has NO `default:`, and `add_row()` creates the row object BEFORE
+   it, so a missing case does not crash or warn: the list renders the right NUMBER of
+   completely BLANK rows. It looks like "the view is empty and a rescan does not help",
+   which sends you hunting in the database instead of the twelve lines that draw it. This
+   is exactly how the Album Artists view shipped broken.
+6. Handle it in `library_back()` so Back leaves it correctly.
+7. If anything deep-links INTO your view (see `library_open_artist`), set every piece of
+   context it depends on there too - a deep-link inherits the last-used state otherwise.
 
 **Parse a new tag in the scanner**
 1. Add the field to `tags_t` in `scanner.c`.
@@ -319,6 +333,10 @@ Run all of it. Do not skip a step because a change "looks safe".
 # Start every line FROM THE REPO ROOT (the directory holding ui/ and tests/).
 # The lines do not chain - go back to the root before each one.
 
+# 0. The tree may hold objects for the OTHER architecture from last time, and the
+#    link would fail on them ("file in wrong format"). Start clean.
+cd ui && find . -name '*.o' -delete && rm -f mq_ui
+
 # 1. compiles + links. No cross toolchain, so the result CANNOT RUN - this only
 #    catches missing symbols and bad prototypes, in seconds.
 cd ui && make CROSS= CFLAGS="-O0 -std=gnu11 -pthread -D_GNU_SOURCE -DLV_CONF_INCLUDE_SIMPLE -I. -w" \
@@ -336,8 +354,9 @@ cd ui && gcc -DSCANNER_TEST -DSCAN_ROOT='"/tmp/sd"' -DDB_PATH='"/tmp/song.db"' \
   -std=gnu11 -D_GNU_SOURCE -I. -fsanitize=address,undefined -o /tmp/scantest \
   scanner.c sqlite3.c -lpthread -ldl -lm && /tmp/scantest
 
-# 4. STEP 1 LEFT AN x86 BINARY AND x86 OBJECTS BEHIND. Delete them before cross-
-#    compiling or the MIPS link dies with "file in wrong format".
+# 4. STEP 1 LEFT AN x86 BINARY AND x86 OBJECTS BEHIND - the same clean again, for the
+#    same reason in the other direction. Skipping it is the single most common way to
+#    waste an hour here.
 cd ui && find . -name '*.o' -delete && rm -f mq_ui
 cd ui && docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" diskos-ui-builder
 cd ui && file mq_ui      # MUST say MIPS. If it says x86-64, DO NOT DEPLOY IT.
@@ -362,7 +381,7 @@ own verdict.
 | What you see | What it actually is |
 |---|---|
 | Deployed a build and NOTHING changed; stock behaviour is back | You deployed an x86 binary. The device could not run it, `diskos-deploy.sh` correctly refused to prune, and `fiio_init`'s watchdog respawned the STOCK UI. Check with `file ui/mq_ui`. |
-| MIPS link fails: `Relocations in generic ELF (EM: 62)` / `file in wrong format` | Stale x86 `.o` files from the native fast check. `find ui -name '*.o' -delete` and rebuild. |
+| Any link fails with `relocations in generic ELF` / `file in wrong format` | Stale objects from the OTHER architecture - `EM: 62` is x86-64 left by the native fast check, `EM: 8` is MIPS left by the Docker build. `cd ui && find . -name '*.o' -delete && rm -f mq_ui`, then rebuild. |
 | A black box where a character should be | No font we ship has that glyph. If it is our own string, make it ASCII (`tests/glyphcheck.py` finds them). If it is tag/network text, route it through `txt_fold_ascii()`. |
 | A scanner change had no effect | `song.db` is only rewritten by a rescan. Menu -> Scan on the device, or re-run the scanner harness. |
 | Tapping a track plays a DIFFERENT track | The on-screen order and `mdb_play_pos()`'s `ORDER BY` disagree. A tap is a position in the player's list, not a path. |
