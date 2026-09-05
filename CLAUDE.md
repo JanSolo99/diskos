@@ -15,6 +15,91 @@ Linux 4.4). Read this before changing anything; most of it is a rule someone lea
 
 Deep to install, thin to run: at runtime we own exactly one process.
 
+## Codebase map
+
+Everything under `ui/` is ours and compiles into the single `mq_ui` binary, EXCEPT two
+vendored blobs that must not be edited: LVGL at `ui/lvgl/` and the SQLite amalgamation
+`ui/sqlite3.c`. Line counts below are a rough "how much is in here".
+
+**Core runtime**
+
+| File | What it is |
+|---|---|
+| `main.c` (2000) | Process entry. Boot-time UI hand-off (reads the Vol-Up GPIO), the LVGL main loop, touch gestures, hardware volume keys, backlight + screensaver timing, app launching, the watchdog. Also holds the **decode seams** - `ui_set_volume`, `ui_set_workmode`, `ui_apply_eq` etc. - which are the only places that turn a UI action into an IPC command. |
+| `screenmgr.c` (366) | The screen stack. One LVGL root per `SCR_*`, push/pop with a slide animation, and the per-screen "refresh on entry" hooks. `screen_show()` / `screen_back()` live here. |
+| `ui.c` (1730) | The Now Playing screen, plus shared UI helpers every other screen uses: `ui_header()`, the volume overlay, album art + accent colour, `ui_font_cjk()`. |
+| `ipc.c` (430) | mqueue IPC with `mq_player`. A dedicated rx thread parses `a1` (position), `a2` (metadata JSON), `a714` (volume) and `a607` (work mode) into a `track_state_t`, and recovers when the player recreates the queues. |
+| `theme.c` (340) | Palettes (dark/light) behind the `th_*()` colour tokens, the `th_font(size)` ladder, and user-TTF loading/caching. |
+| `config.c` (160) | `cfg_get_int` / `cfg_set_int` / `cfg_get_str` / `cfg_set_str` - the persisted key-value store behind every diskOS setting. Batch writes with `cfg_set_int_deferred` + `cfg_flush` (one atomic rewrite). |
+| `fb_pan.c` (100) | Framebuffer flush. The panel is mounted 180 degrees rotated and this is what un-rotates it. |
+| `anim.c` (126) | Animation helpers: spring paths, slides, fades, the press bounce. |
+| `toast.c` (44) | `ui_toast("...")` - the transient message pill. |
+| `fileutil.c` (70) | One atomic-copy implementation, shared by the art cache and the font cache. |
+| `txtfold.c` (120) | Folds codepoints no font we ship can draw down to ASCII. See "Text that reaches the screen" below. |
+
+**Screens** - each has a `*_create(lv_obj_t *root)` called once from `screens_init()`
+
+`home.c` (400) Home - clock, weather, Library pill, now-playing pill.
+`library.c` (830) the Library browser: category menu, Songs / Albums / Artists / Album
+Artists / Genres / Playlists / Favourites / History, drill-in, the A-Z scrubber, per-view
+scroll memory. `apps.c` (160) the Menu tile grid (swipe left from Home).
+`settings.c` (780) the whole Settings tree, driven by one table (see the recipe below).
+`search.c` `songinfo.c` `npmenus.c` (Now Playing side panels) `eqcustom.c` (10-band EQ)
+`colorpick.c` (accent picker) `modes.c` (audio source) `playlistview.c` `quicksettings.c`
+(pull-down panel) `saver.c` (screensaver styles) `scanview.c` (scan progress)
+`debug_ui.c` (Debug Mode - SSH password) `fontpick.c` `lastfm_ui.c` `kbinput.c`
+(on-screen keyboard) `lyrics.c` `weather.c` `wifi.c` `bt.c`.
+
+**Subsystems (no UI of their own)**
+
+| File | What it is |
+|---|---|
+| `musicdb.c` (1000) | All reads of `song.db`. Loads the library into memory once, then serves grouping (artists/albums/genres), ordering, playlists, favourites and play stats. **Every list on screen comes from here.** |
+| `scanner.c` (950) | The SD-card scanner and every tag parser (ID3v1/v2, Vorbis, MP4, APEv2, DSF). The only thing that WRITES `song.db`. |
+| `art.c` / `artcache.c` | Album art: `art.c` shells out to ffmpeg to pull the embedded cover out of a track and render cover/thumb/backdrop; `artcache.c` caches the results on the SD card. |
+| `lastfm.c` | Scrobbling engine (`lastfm_ui.c` is only its view). `md5.c` signs its requests. |
+| `sysconfig.c` | Typed access to the STOCK settings table, `/usr/data/fiio/db/sysconfig.db`. |
+| `fwcaps.c` | Firmware-version capability table - which IPC tag a given stock version accepts. |
+
+**Standalone device tools** - built separately, NOT part of `mq_ui`:
+`fbshot.c` (framebuffer to PNG), `mqcap.c` (capture `/ui` frames), `mqfeed.c` (inject fake
+metadata), `mqsend.c` / `psend.c` (send one raw frame), `touchcap.c` / `touchdisc.c`.
+
+Adding a new `ui/*.c` means adding it to `APP_SRCS` in `ui/Makefile` or it will not link.
+
+## How the data flows
+
+Know these four paths before changing anything; most bugs are a misunderstanding of one.
+
+**1. Now Playing text** - `mq_player` sends an `a2` JSON frame -> `ipc.c parse_a2()` ->
+`g_state` (a `track_state_t`) -> `main.c` reads it each loop -> `ui_update()` paints it.
+The player is the source of truth here, NOT our database.
+
+**2. Library lists** - `scanner.c` walks the SD card and writes `song.db` -> `musicdb.c
+mdb_load()` reads the whole table into `g_songs` ONCE at startup -> `library.c` calls
+`mdb_artists()` / `mdb_album_songs()` etc. to build each list.
+
+**Consequence you must remember: a scanner change does nothing until the user rescans.**
+A `musicdb.c` change applies immediately, because it happens on read.
+
+**3. Playing a track** - the UI does NOT hand the player a file path. It asks the player to
+rebuild its own list (`list_type` + a name) and then jumps to a POSITION in that list.
+`mdb_play_pos()` recomputes that position by replicating the player's exact `ORDER BY`.
+**So any list you re-order on screen must be re-ordered to match `mdb_play_pos`,** or a tap
+starts the wrong song. `on_song_play()` in `main.c` falls back to the all-songs scope when
+the player's list does not contain the track.
+
+**4. Text that reaches the screen** - the fonts we ship cover ASCII `U+0020..U+007E`, the
+`LV_SYMBOL` icons, and (only on labels that opt in via `ui_font_cjk`) CJK from `U+3001`.
+Nothing else has a glyph, so it draws as a black box. Two rules follow:
+
+- **Runtime text from outside** (tags, weather, anything off the network) must go through
+  `txt_fold_ascii()` - already done for `ipc.c` metadata, `musicdb.c` rows and `weather.c`.
+  Never fold a FILE PATH; it has to keep its exact bytes to open.
+- **Literals in our own source must be plain ASCII.** No typographic ellipsis, en dash, em
+  dash, middle dot, curly quote or accented letter. Write `...` and `-`.
+  `python3 tests/glyphcheck.py` enforces this and will fail the build if you forget.
+
 ## Rules that will bite you
 
 - **Never kill `mq_player`.** It frees the SD card and the MCU hard-reboots the device. Only ever
@@ -30,6 +115,15 @@ Deep to install, thin to run: at runtime we own exactly one process.
   file**, so the default is diskOS already - holding Vol-Up on a new flash hands off to STOCK, the
   opposite of what you'd guess from a device that was previously toggled to default-stock. Plain
   power-on is the way to reach diskOS on a device that has never had Default UI touched.
+- **Never invent, guess or "try" an IPC tag.** Every frame diskOS sends was reverse-engineered
+  and verified against the stock UI; `docs/COMMAND_MAP.md` is the ground truth and
+  `docs/RE_CATALOGUE.md` says what is still unknown. Guessing here does not fail politely:
+  routing to Bluetooth with `0666000C0002` but skipping its `0666000C0006` pre-stop makes
+  `mq_player` SIGSEGV, which frees the SD card and hard-reboots the device from the MCU.
+  Sending `0666` at all to an idle, freshly-booted player wedges it (`g_fiio_local` null).
+  An early play-mode toggle used `0657` - the audio SOURCE switch - and could have done the
+  same. Tags are also FIRMWARE-VERSION dependent (V2.09 sets gain with `0645`, V2.28 with
+  `0649`; see `fwcaps.c`). Send only through an existing decode seam in `main.c`.
 - **Paint from theme tokens.** `th_bg()`, `th_card()`, `th_text()`... never a raw `lv_color_hex()`. A
   literal looks right in whichever palette you developed against and wrong in the other. Fixed brand
   or state colours (Last.fm red, iOS state blue, the user's accent) are the deliberate exception.
@@ -74,6 +168,14 @@ seconds, though the result cannot run:
 ```sh
 cd ui && make CROSS= CFLAGS="-O0 -std=gnu11 -pthread -D_GNU_SOURCE -DLV_CONF_INCLUDE_SIMPLE -I. -w" \
   LDLIBS="-lm -lrt -lcrypt" mq_ui
+```
+
+**Order matters between those two.** The fast check writes an x86-64 `ui/mq_ui` and x86
+`.o` files all through the tree; run the Docker build after it without clearing them and the
+MIPS link dies with `Relocations in generic ELF (EM: 62)` / `file in wrong format`. Always:
+
+```sh
+cd ui && find . -name '*.o' -delete && rm -f mq_ui     # before EVERY cross build
 ```
 
 Adding a `ui/*.c` file means adding it to `APP_SRCS` in `ui/Makefile`.
@@ -152,6 +254,98 @@ tools/diskos-touch.sh                    # inject taps/swipes
 See `docs/DEV_WORKFLOW.md`. Hand-deployed binaries revert on reboot (S97 verifies `/usr/data/mq_ui`
 against a baked manifest), which makes this safe to experiment with.
 
+## Recipes
+
+Copy these. They are the shapes the codebase already uses; inventing a different one is
+almost always wrong.
+
+**Add a UI source file**
+1. Create `ui/yourfile.c`, starting with the two SPDX/copyright lines every file has.
+2. Add `$(APP)/yourfile.c` to `APP_SRCS` in `ui/Makefile`. Missing this = link error.
+3. Declare anything public in `ui/screens.h` (screens) or its own `.h`.
+
+**Add a screen**
+1. Add `SCR_YOURS` to the `enum` in `ui/screens.h`, **appended at the END, immediately
+   before `SCR_COUNT`** - inserting it mid-list renumbers every screen after it.
+2. Declare `void yours_create(lv_obj_t *root);` in `screens.h`.
+3. In `screenmgr.c screens_init()`: add `s_roots[SCR_YOURS] = screen_make_root(parent);`
+   next to the others, then `yours_create(s_roots[SCR_YOURS]);` in the create block below.
+4. In your `yours_create()`, paint the background from `th_bg()` and add `ui_header(root,
+   "Title")` for the standard back chevron.
+5. Open it with `screen_show(SCR_YOURS)`; `screen_back()` returns.
+6. If the screen shows values that can change while it is hidden, add a refresh hook in
+   `screenmgr.c` next to the `to == SCR_SETTINGS` / `to == SCR_TUNE` cases, or it will show
+   stale data on re-entry.
+
+**Add a setting**
+Append one row to the table in `settings.c` (fields, in order):
+`{ group, label, type, cfg_key, min, max, step, opts, nopts, ro_val, apply, def, desc, opt_descs }`
+- `type` is `ST_TOGGLE` / `ST_SLIDER` / `ST_CYCLER` / `ST_READONLY` / `ST_ACTION`.
+- `cfg_key` is the `config.c` key it persists to. Pick a new, unique one.
+- `apply` is an optional hook run when the value changes - put anything that must reach the
+  player in a decode seam in `main.c`, not in `settings.c`.
+- `group` puts it under an existing Settings category; a new string makes a new category.
+
+**Add a Library view**
+1. Add `VIEW_YOURS` to the `enum` at the top of `library.c`, before `VIEW_COUNT`.
+2. Add its title to `VIEW_TITLE[]` **at the matching index** - a `_Static_assert` enforces
+   the count, but not the order, so put it in the right slot.
+3. Add it to `CATS[]` / `CATV[]` in the `VIEW_MENU` branch to get a menu row.
+4. Add an `else if(g_view==VIEW_YOURS)` branch in `library_reload()` that fills `g_gnames`
+   (or `g_buf`), sets `g_count`, and calls `fill_start(n)`.
+5. Handle it in `library_back()` so Back leaves it correctly.
+
+**Parse a new tag in the scanner**
+1. Add the field to `tags_t` in `scanner.c`.
+2. Fill it in each container parser you care about: `id3v2_read` (ID3 text frames),
+   `vc_parse` (FLAC/Ogg/Opus), `mp4_ilst_field` (M4A - note `trkn`/`disk` are BINARY, and
+   any atom that does not start with the `0xA9` marker must also be added to the dispatch
+   list in `mp4_walk`), `apev2_read`.
+3. Bind it into BOTH `INS_SONG` and `UPD_SONG` (the two SQL strings in `scanner.c`), and
+   into the `bind_tags()` / `bind_extra()` helper that fills them. Both statements use
+   **explicit `?N` parameters** because SQLite numbers a bare `?` by order of appearance -
+   adding a placeholder mid-list would silently renumber every later bind.
+4. Read it in `musicdb.c mdb_load()` and add it to `mdb_song_t`.
+5. **It only appears after a rescan.** Test with the scanner harness, not on hardware.
+
+**Change something on the Now Playing screen** - it is `ui.c`, function `ui_update()`.
+That runs every loop iteration, so do no work there beyond painting.
+
+## Before you say it is done
+
+Run all of it. Do not skip a step because a change "looks safe".
+
+```sh
+# Start every line FROM THE REPO ROOT (the directory holding ui/ and tests/).
+# The lines do not chain - go back to the root before each one.
+
+# 1. compiles + links. No cross toolchain, so the result CANNOT RUN - this only
+#    catches missing symbols and bad prototypes, in seconds.
+cd ui && make CROSS= CFLAGS="-O0 -std=gnu11 -pthread -D_GNU_SOURCE -DLV_CONF_INCLUDE_SIMPLE -I. -w" \
+  LDLIBS="-lm -lrt -lcrypt" mq_ui
+
+# 2. the test suites (glyphcheck/managercheck/diagcheck run from the ROOT, fontcheck from ui/)
+cd ui && make fontcheck && ./fontcheck
+python3 tests/managercheck.py
+python3 tests/diagcheck.py
+python3 tests/glyphcheck.py
+
+# 3. only if you touched scanner.c. SCAN_ROOT must be a REAL MOUNTPOINT (the scanner
+#    refuses to rebuild from an unmounted card): sudo mount -t tmpfs tmpfs /tmp/sd
+cd ui && gcc -DSCANNER_TEST -DSCAN_ROOT='"/tmp/sd"' -DDB_PATH='"/tmp/song.db"' \
+  -std=gnu11 -D_GNU_SOURCE -I. -fsanitize=address,undefined -o /tmp/scantest \
+  scanner.c sqlite3.c -lpthread -ldl -lm && /tmp/scantest
+
+# 4. STEP 1 LEFT AN x86 BINARY AND x86 OBJECTS BEHIND. Delete them before cross-
+#    compiling or the MIPS link dies with "file in wrong format".
+cd ui && find . -name '*.o' -delete && rm -f mq_ui
+cd ui && docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" diskos-ui-builder
+cd ui && file mq_ui      # MUST say MIPS. If it says x86-64, DO NOT DEPLOY IT.
+```
+
+State plainly which of these you ran and what they said. If something fails, say so with
+the output rather than describing the change as complete.
+
 ## Diagnostics
 
 Host side: every installer/manager run appends to `<state>/logs/diskos.log` (always on, rotated).
@@ -162,6 +356,20 @@ Device side: `/usr/data/diskos_boot.log`, `coldplug.log`. Not yet pulled into th
 
 Errors carry stable codes - `E1xx` preflight, `E2xx` build, `E3xx` flash, `F1xx` the device writer's
 own verdict.
+
+## Symptom -> cause
+
+| What you see | What it actually is |
+|---|---|
+| Deployed a build and NOTHING changed; stock behaviour is back | You deployed an x86 binary. The device could not run it, `diskos-deploy.sh` correctly refused to prune, and `fiio_init`'s watchdog respawned the STOCK UI. Check with `file ui/mq_ui`. |
+| MIPS link fails: `Relocations in generic ELF (EM: 62)` / `file in wrong format` | Stale x86 `.o` files from the native fast check. `find ui -name '*.o' -delete` and rebuild. |
+| A black box where a character should be | No font we ship has that glyph. If it is our own string, make it ASCII (`tests/glyphcheck.py` finds them). If it is tag/network text, route it through `txt_fold_ascii()`. |
+| A scanner change had no effect | `song.db` is only rewritten by a rescan. Menu -> Scan on the device, or re-run the scanner harness. |
+| Tapping a track plays a DIFFERENT track | The on-screen order and `mdb_play_pos()`'s `ORDER BY` disagree. A tap is a position in the player's list, not a path. |
+| The whole UI froze, or the screen will not wake | Something slow on the LVGL thread - an unbounded `popen`, a blocking network call. Bound it or move it to a worker. |
+| Settings shows a stale value on re-entry | The screen needs a refresh hook in `screenmgr.c`'s entry switch. |
+| `install.sh` or a `tools/*.sh` dies with `invalid option name` or `$'\r'` | You ran a CRLF checkout of the script under WSL bash. Run it from the WSL-native clone (`~/diskos-build`), not `/mnt/f/...`. |
+| The device reboots itself (~10s) | Something killed `mq_player`. Never do that - only ever restart `mq_ui`. |
 
 ## Reference
 
@@ -192,9 +400,20 @@ Fixed from the first hardware session (all built + unit-tested, **none confirmed
 - `scanner.c`: now actually parses `ALBUM_ARTIST` (TPE2 / ALBUMARTIST / `aART`) and `DISC`/`TRACK`
   (TRCK/TPOS, TRACKNUMBER/DISCNUMBER, and MP4's BINARY `trkn`/`disk` atoms). Parsers were refactored
   to pass one `tags_t*` instead of four `char*` out-params. **Needs a RESCAN to take effect.**
-- `musicdb.c`: Artists group by `ALBUM_ARTIST` when present, else `ARTIST` with a "feat." tail
-  stripped; `mdb_album_songs()` returns DISC/TRACK order replicating the player's own `ORDER_ALBUM`
+- `musicdb.c`: the Library now offers TWO artist axes, because neither answers the other's
+  question - `mdb_artists()` and friends take an `MDB_AR_TRACK` / `MDB_AR_ALBUM` axis and cache
+  per axis. **Artists** is the raw `ARTIST` tag (a guest stays findable under their own name);
+  **Album Artists** is `ALBUM_ARTIST`, else `ARTIST` with a "feat." tail stripped - including
+  the BRACKETED forms, "50 Cent (feat. Eminem)" and "50 Cent [ft. Nate Dogg]", which is how
+  most taggers actually write it and which the first attempt missed entirely.
+  `mdb_album_songs()` returns DISC/TRACK order replicating the player's own `ORDER_ALBUM`
   exactly (they MUST agree - a tap is sent as a position in the player's list).
+- **Undrawable literals in our OWN strings**, which had nothing to do with anybody's tags:
+  "Turning on Wi-Fi<box>", "Charging <box> still playing", "Scan failed <box> library kept",
+  the scan-progress label (which was ONLY an ellipsis), and "Album <box> 3/19" permanently on
+  Now Playing. 17 escapes replaced with ASCII. Weather text now folds too - `wttr.in` sends a
+  real degree sign. `tests/glyphcheck.py` is new and fails on any UI literal outside what we
+  can draw; it was verified to fail on a planted literal before being trusted.
 - `apps.c`: the Menu grid was 2.13 rows tall so a scroll always rested mid-row, AND its bottom edge
   sat at y=326 where the round screen gives only 210px of chord against a 266px row - the bottom row
   was clipped by the bezel. Now exactly two rows ending at y=296, with `LV_SCROLL_SNAP_START`.
@@ -212,10 +431,14 @@ except the volume fix.
 Known gaps worth doing next, in rough order: the scanner still never writes `DURATION`, year or
 bitrate, and binds `ADD_TIME` to a hardcoded constant; there is no on-device update path (every
 PERMANENT UI change is a 60-90 min reflash - `tools/diskos-deploy.sh` covers testing, but S97 reverts
-a hand-deployed binary on the next boot); no folder browser; no play queue; the Library wants a
-separate "Album Artists" axis alongside the raw-ARTIST "Artists" one. `mq_player` embeds a working
-AirPlay stack that only needs its trigger tag pinned - `docs/RE_CATALOGUE.md` names the exact next
-step.
+a hand-deployed binary on the next boot); no folder browser; no play queue. `mq_player` embeds a
+working AirPlay stack that only needs its trigger tag pinned - `docs/RE_CATALOGUE.md` names the
+exact next step.
+
+Runtime text that is still NOT folded, and will still show boxes if it contains anything outside
+ASCII: Wi-Fi SSIDs (`wifi.c`), Bluetooth device names (`bt.c`), fetched lyrics (`lyrics.c`),
+filenames shown during a scan (`scanview.c`), and homebrew app names from `app.conf` (`apps.c`).
+Each is a one-line `txt_fold_ascii()` call at the point the name is displayed.
 
 One inherent limit: "play all by artist" sends the player `list_type 2` + a name, and the player
 filters `WHERE ARTIST=?`. An album-artist-grouped row therefore queues fewer tracks than the UI
