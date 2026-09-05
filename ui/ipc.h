@@ -35,6 +35,7 @@ int  ipc_take_send_error(void);        /* 1 (and clears) if a recent send failed
 void ipc_health_check(void);           /* ~30s: detect player-restart queue recreation (fstat identity) */
 int  ipc_take_reconnected(void);       /* 1 (and clears) after a recovery reattach -> caller resyncs */
 unsigned ipc_rx_frames(void);          /* count of /ui frames received from the player (>0 => player up) */
+int  ipc_take_power_event(void);       /* 1 if the player reported a physical power-key event */
 int  ipc_player_mode(void);            /* last a607 player mode this gen: -1=none, 8=LOCALPLAYER (v2.40 oracle) */
 unsigned ipc_generation(void);         /* bumps on each /ui reattach (player restart) - v2.40 one-shot re-arm */
 #endif

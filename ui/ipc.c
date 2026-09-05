@@ -18,6 +18,7 @@
 static mqd_t g_rx=(mqd_t)-1, g_tx=(mqd_t)-1;
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static track_state_t g_state;
+static int g_power_event;
 
 /* ---- player-restart recovery ---------------------------
  * The stock player can unlink+recreate /ui and /player on restart, orphaning any
@@ -214,6 +215,11 @@ static void parse_frame(const char*buf,int n){
         if(!all_hex(h,4)) return;
         int mode=(int)strtol(h,0,16);
         pthread_mutex_lock(&g_recov_mu); g_player_mode=mode; pthread_mutex_unlock(&g_recov_mu);
+    } else if(buf[0]=='a'&&buf[1]=='a'&&buf[2]=='1'&&buf[3]=='c'){
+        /* The player owns event0 and forwards physical power-key activity here. Keep
+         * this as an event, not a guessed action: press/release and long-press
+         * meanings remain stock-player behavior. */
+        pthread_mutex_lock(&g_mu); g_power_event=1; pthread_mutex_unlock(&g_mu);
     }
     /* NB: for playback the player emits a1/a2/a714 to /ui (a2=state/love/work_mode/track, a1=position,
      * a714=volume) - no a622/a639/a704 completion replies. SEPARATELY, a 0607 query (or a 0657 setter)
@@ -348,6 +354,12 @@ int ipc_take_reconnected(void){
  * the main loop to guarantee the initial audio apply even if the cold-boot /ui reopen never fired. */
 unsigned ipc_rx_frames(void){
     pthread_mutex_lock(&g_recov_mu); unsigned r=g_rx_frames; pthread_mutex_unlock(&g_recov_mu);
+    return r;
+}
+int ipc_take_power_event(void){
+    pthread_mutex_lock(&g_mu);
+    int r=g_power_event; g_power_event=0;
+    pthread_mutex_unlock(&g_mu);
     return r;
 }
 /* Last a607 external-mode reported by the player THIS generation: -1 = none yet (player not confirmed at

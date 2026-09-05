@@ -1710,6 +1710,7 @@ int main(int argc, char **argv){
          * count it as activity, and wake the screen so the bar is visible. */
         int volkey_edge  = volkeys_pressed();
         int vol_changed   = (st.volume_seq != last_vol_seq);
+        int power_event   = ipc_take_power_event();
         if(vol_changed) last_vol_seq = st.volume_seq;
         /* A real volume change (a714) wakes the screen, as it always did. A bare KEY
          * EDGE only paints the bar on an already-lit screen - deliberately not a wake
@@ -1720,6 +1721,14 @@ int main(int argc, char **argv){
             if(vol_changed && bl_state){ ui_backlight(ui_get_brightness()); bl_state = 0; }
             if(screen_current()==SCR_SAVER) screen_back();
             ui_show_volume(st.volume);
+        }
+        /* The physical power key is consumed by mq_player on event0. It reports
+         * activity as aa1c on /ui; wake our screen-off backlight without sending
+         * a guessed power command. */
+        if(power_event && bl_state){
+            last_activity = lv_tick_get();
+            ui_backlight(ui_get_brightness()); bl_state = 0;
+            if(screen_current()==SCR_SAVER) screen_back();
         }
         /* the metadata 'state' field is unreliable (reports 0 while playing);
          * infer play/pause from whether position is advancing. */
