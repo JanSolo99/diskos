@@ -9,7 +9,7 @@
 #include <ctype.h>
 #include "config.h"
 
-enum { VIEW_MENU, VIEW_SONGS, VIEW_ALBUMS, VIEW_ARTISTS, VIEW_PLAYLISTS, VIEW_FAVS, VIEW_GENRES, VIEW_GROUP, VIEW_MOSTPLAYED, VIEW_RECENT, VIEW_HISTORY, VIEW_ARTIST_ALBUMS, VIEW_COUNT };
+enum { VIEW_MENU, VIEW_SONGS, VIEW_ALBUMS, VIEW_ARTISTS, VIEW_PLAYLISTS, VIEW_FAVS, VIEW_GENRES, VIEW_GROUP, VIEW_MOSTPLAYED, VIEW_RECENT, VIEW_HISTORY, VIEW_ARTIST_ALBUMS, VIEW_ALBUM_ARTISTS, VIEW_COUNT };
 
 #define ROW_H 52
 #define LIST_Y 70
@@ -28,6 +28,11 @@ static int g_drill_kind = 0;  /* 1 album, 2 artist, 3 genre, 4 one album WITHIN 
  * an Artists row is tapped and kept for the whole Artist -> Albums -> Tracks descent,
  * so Back knows to return to that artist's album list rather than the flat A-Z. */
 static char g_artist[MDB_STR];
+/* Which Artists list we drilled in FROM (MDB_AR_TRACK / MDB_AR_ALBUM). Artist -> Albums
+ * -> Tracks has to resolve on the SAME axis it was opened on, or an album artist row
+ * would list its tracks by the raw-ARTIST rule and come back half empty. Also decides
+ * which list BACK returns to. */
+static int  g_ar_axis = MDB_AR_TRACK;
 static int  g_artist_total;   /* that artist's total track count (the "All Songs" row) */
 static int g_deeplink = 0;    /* drill opened from the NP hub -> back leaves the Library */
 static int g_has_header = 0;   /* a Play All / Shuffle row is the first list child */
@@ -242,7 +247,8 @@ static void group_cb(lv_event_t *e){
     int gi=(int)(uintptr_t)lv_event_get_user_data(e);
     g_deeplink=0;   /* normal in-library drill: back returns to the category list */
     scroll_remember();   /* so BACK lands where you left this list */
-    if(g_view==VIEW_ARTISTS){
+    if(g_view==VIEW_ARTISTS || g_view==VIEW_ALBUM_ARTISTS){
+        g_ar_axis = (g_view==VIEW_ALBUM_ARTISTS) ? MDB_AR_ALBUM : MDB_AR_TRACK;
         /* Artists used to jump straight to a flat list of every track the artist
          * appears on - no album structure at all, the same complaint people had about
          * the stock UI. Descend into their ALBUMS instead; the album list carries an
@@ -305,14 +311,17 @@ int library_back(void){
         if(g_artist[0]){    /* inside an artist: step back to THEIR albums, not the A-Z */
             g_view=VIEW_ARTIST_ALBUMS; g_drill_kind=0; scroll_restore_pending(); library_reload(); return 1;
         }
-        g_view=(g_drill_kind==1)?VIEW_ALBUMS:(g_drill_kind==3)?VIEW_GENRES:VIEW_ARTISTS;
+        g_view=(g_drill_kind==1)?VIEW_ALBUMS:(g_drill_kind==3)?VIEW_GENRES
+             :(g_ar_axis==MDB_AR_ALBUM)?VIEW_ALBUM_ARTISTS:VIEW_ARTISTS;
         g_drill_kind=0; scroll_restore_pending(); library_reload(); return 1;
     }
     if(g_view==VIEW_ARTIST_ALBUMS){
         if(g_deeplink){  /* opened from the hub -> leave the Library entirely */
             g_deeplink=0; g_view=VIEW_MENU; g_artist[0]=0; library_reload(); return 0;
         }
-        g_artist[0]=0; g_view=VIEW_ARTISTS; scroll_restore_pending(); library_reload(); return 1;
+        g_artist[0]=0;
+        g_view=(g_ar_axis==MDB_AR_ALBUM)?VIEW_ALBUM_ARTISTS:VIEW_ARTISTS;
+        scroll_restore_pending(); library_reload(); return 1;
     }
     if(g_view==VIEW_MOSTPLAYED || g_view==VIEW_RECENT){ g_view=VIEW_HISTORY; scroll_restore_pending(); library_reload(); return 1; }  /* stats -> History */
     if(g_view!=VIEW_MENU){ g_view=VIEW_MENU; scroll_restore_pending(); library_reload(); return 1; }
@@ -511,7 +520,7 @@ static void add_play_header(void){
     g_has_header = 1;
 }
 
-static const char *VIEW_TITLE[] = { "Library","Songs","Albums","Artists","Playlists","Favourites","Genres","","Most Played","Recently Played","History","" };
+static const char *VIEW_TITLE[] = { "Library","Songs","Albums","Artists","Playlists","Favourites","Genres","","Most Played","Recently Played","History","","Album Artists" };
 /* keep VIEW_TITLE[] in lockstep with the view enum so VIEW_TITLE[g_view] can't read out of bounds */
 _Static_assert(sizeof(VIEW_TITLE)/sizeof(VIEW_TITLE[0]) == VIEW_COUNT, "VIEW_TITLE must have one entry per view");
 
@@ -538,8 +547,8 @@ static void library_reload(void){
 
     /* one-time discoverability hints for the invisible long-press actions */
     static int s_group_hold_hint=0, s_fav_hold_hint=0;
-    if((g_view==VIEW_ALBUMS || g_view==VIEW_ARTISTS || g_view==VIEW_GENRES ||
-        g_view==VIEW_ARTIST_ALBUMS) && !s_group_hold_hint){
+    if((g_view==VIEW_ALBUMS || g_view==VIEW_ARTISTS || g_view==VIEW_ALBUM_ARTISTS ||
+        g_view==VIEW_GENRES || g_view==VIEW_ARTIST_ALBUMS) && !s_group_hold_hint){
         s_group_hold_hint=1; ui_toast("Hold an item to play all");
     } else if(g_view==VIEW_FAVS && !s_fav_hold_hint){
         s_fav_hold_hint=1; ui_toast("Hold to remove");
@@ -549,9 +558,10 @@ static void library_reload(void){
 
     if(g_view==VIEW_MENU){
         /* "Most Played" + "Recently Played" are play STATS, not catalog axes -> grouped under History */
-        static const char *CATS[] = { "Songs","Albums","Artists","Genres","Playlists","Favourites","History" };
-        static const int   CATV[] = { VIEW_SONGS,VIEW_ALBUMS,VIEW_ARTISTS,VIEW_GENRES,VIEW_PLAYLISTS,VIEW_FAVS,VIEW_HISTORY };
-        for(int i=0;i<7;i++){
+        static const char *CATS[] = { "Songs","Albums","Artists","Album Artists","Genres","Playlists","Favourites","History" };
+        static const int   CATV[] = { VIEW_SONGS,VIEW_ALBUMS,VIEW_ARTISTS,VIEW_ALBUM_ARTISTS,VIEW_GENRES,VIEW_PLAYLISTS,VIEW_FAVS,VIEW_HISTORY };
+        _Static_assert(sizeof(CATS)/sizeof(CATS[0]) == sizeof(CATV)/sizeof(CATV[0]), "CATS/CATV must pair up");
+        for(int i=0;i<(int)(sizeof(CATS)/sizeof(CATS[0]));i++){
             lv_obj_t *r = base_row();
             lv_obj_add_event_cb(r, menu_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)CATV[i]);
             row_two(r, CATS[i], NULL, NULL);
@@ -586,7 +596,7 @@ static void library_reload(void){
          * buttons under it disagreed about what "all" meant. */
         if(g_view==VIEW_GROUP) n=(g_drill_kind==1 || g_drill_kind==4)?mdb_album_songs(g_drill,g_buf,g_alloc_n)
                                  :(g_drill_kind==3)?mdb_genre_songs(g_drill,g_buf,g_alloc_n)
-                                 :mdb_artist_songs(g_drill,g_buf,g_alloc_n);
+                                 :mdb_artist_songs(g_ar_axis,g_drill,g_buf,g_alloc_n);
         else { n=mdb_song_count(); if(n>g_alloc_n) n=g_alloc_n; for(int i=0;i<n;i++) g_buf[i]=mdb_song(i); }
         if(n<=0){ empty_scan("No songs found"); return; }
         add_play_header();
@@ -598,16 +608,16 @@ static void library_reload(void){
         if(n<=0){ empty_scan("No albums found"); return; }
         for(int i=0;i<n;i++) g_first[i]=first_letter(g_gnames[i]);
         g_count=n; fill_start(n); az_show(1);
-    } else if(g_view==VIEW_ARTISTS){
-        int n=mdb_artists(g_gnames,g_grp_cap);
+    } else if(g_view==VIEW_ARTISTS || g_view==VIEW_ALBUM_ARTISTS){
+        int n=mdb_artists(g_view==VIEW_ALBUM_ARTISTS ? MDB_AR_ALBUM : MDB_AR_TRACK, g_gnames, g_grp_cap);
         if(n<=0){ empty_scan("No artists found"); return; }
         for(int i=0;i<n;i++) g_first[i]=first_letter(g_gnames[i]);
         g_count=n; fill_start(n); az_show(1);
     } else if(g_view==VIEW_ARTIST_ALBUMS){
         /* cap-1: the list carries one extra synthetic row on top, and g_first is
          * sized to g_grp_cap - asking for a full cap of albums would write one past it. */
-        int n=mdb_artist_albums(g_artist,g_gnames,g_gcounts,g_grp_cap>0?g_grp_cap-1:0);
-        g_artist_total = mdb_artist_songs(g_artist, g_buf, g_alloc_n);   /* for the "All Songs" count */
+        int n=mdb_artist_albums(g_ar_axis,g_artist,g_gnames,g_gcounts,g_grp_cap>0?g_grp_cap-1:0);
+        g_artist_total = mdb_artist_songs(g_ar_axis, g_artist, g_buf, g_alloc_n);   /* for the "All Songs" count */
         if(g_artist_total<=0){ empty_label("No songs by this artist"); return; }
         /* +1 for the leading "All Songs" row; g_first drives the A-Z scrubber, and
          * that row is pinned to the top, so give it '#' rather than an album letter. */

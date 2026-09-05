@@ -25,11 +25,11 @@ static int g_load_err = 0;   /* mdb_load hit a DB error (BUSY/IOERR/OOM) vs a ge
  * These are derived from g_songs by parse+sort+dedup - expensive to recompute
  * on every list open.  Build once, cache, and return a fast memcpy thereafter
  * (so opening Artists/Albums is as instant as Songs).  mdb_load() invalidates. */
-static char (*g_cart)[MDB_STR];                      static int  g_cart_n = -1;   /* artists */
+static char (*g_cart[MDB_AR_AXES])[MDB_STR];         static int  g_cart_n[MDB_AR_AXES] = { -1, -1 };  /* artists, per axis */
 static char (*g_calb)[MDB_STR], (*g_calb_ar)[MDB_STR]; static int *g_calb_ct; static int g_calb_n = -1; /* albums */
 static char (*g_cgen)[MDB_STR];                      static int *g_cgen_ct;  static int g_cgen_n = -1;   /* genres */
 static void groups_free(void){
-    free(g_cart);    g_cart=NULL;    g_cart_n=-1;
+    for(int a = 0; a < MDB_AR_AXES; a++){ free(g_cart[a]); g_cart[a]=NULL; g_cart_n[a]=-1; }
     free(g_calb);    free(g_calb_ar); free(g_calb_ct);
     g_calb=NULL; g_calb_ar=NULL; g_calb_ct=NULL; g_calb_n=-1;
     free(g_cgen);    free(g_cgen_ct); g_cgen=NULL; g_cgen_ct=NULL; g_cgen_n=-1;
@@ -168,7 +168,8 @@ static void song_norm(mdb_song_t *s){
  * typical rip tags every track ARTIST="50 Cent feat. <someone>" but ALBUM_ARTIST=
  * "50 Cent", so grouping on ARTIST listed "50 Cent", "50 Cent feat. Eminem" and
  * "50 Cent feat. Lloyd Banks" as three different artists. */
-static const char *song_group_src(const mdb_song_t *s){
+static const char *song_group_src(const mdb_song_t *s, int axis){
+    if(axis == MDB_AR_TRACK) return s->artist;       /* the tag exactly as written */
     return s->album_artist[0] ? s->album_artist : s->artist;
 }
 
@@ -191,10 +192,12 @@ static void strip_featuring(char *s){
 
 /* Split one song's grouping name into individual artists - the comma/semicolon split
  * the Artists list has always done, applied to the ALBUM_ARTIST-preferred source. */
-static int song_artist_toks(const mdb_song_t *s, char toks[][MDB_STR], int cap){
+static int song_artist_toks(const mdb_song_t *s, int axis, char toks[][MDB_STR], int cap){
     char key[MDB_STR];
-    snprintf(key, MDB_STR, "%s", song_group_src(s));
-    if(!s->album_artist[0]) strip_featuring(key);
+    snprintf(key, MDB_STR, "%s", song_group_src(s, axis));
+    /* Only the ALBUM axis rewrites the name, and only when the file gave us no album
+     * artist of its own - a real ALBUM_ARTIST tag is authoritative and never edited. */
+    if(axis == MDB_AR_ALBUM && !s->album_artist[0]) strip_featuring(key);
     trim(key);
     return mdb_split_artists(key, toks, cap);
 }
@@ -430,7 +433,7 @@ int mdb_albums(char names[][MDB_STR], char artists[][MDB_STR], int *counts, int 
         mdb_ai_t *tmp = malloc((size_t)(g_n>0?g_n:1) * sizeof *tmp);
         if(!tmp) return 0;                                   /* transient OOM: don't cache, retry later */
         int m = 0;
-        for(int i=0;i<g_n;i++) if(g_songs[i].album[0]){ tmp[m].al=g_songs[i].album; tmp[m].ar=song_group_src(&g_songs[i]); m++; }
+        for(int i=0;i<g_n;i++) if(g_songs[i].album[0]){ tmp[m].al=g_songs[i].album; tmp[m].ar=song_group_src(&g_songs[i], MDB_AR_ALBUM); m++; }
         qsort(tmp, (size_t)m, sizeof *tmp, mdb_ai_cmp);      /* sort by album, then group adjacent */
         int n = 0;
         for(int i=0;i<m;i++){
@@ -487,14 +490,15 @@ static int album_track_count(const char *album)
 /* qsort comparator over the flat names[][MDB_STR] array (case-insensitive) */
 static int mdb_name_ci_cmp(const void *a, const void *b){ return strcasecmp((const char*)a, (const char*)b); }
 
-int mdb_artists(char names[][MDB_STR], int cap){
-    if(g_cart_n < 0){                                        /* build once, then cache */
+int mdb_artists(int axis, char names[][MDB_STR], int cap){
+    if(axis < 0 || axis >= MDB_AR_AXES) axis = MDB_AR_TRACK;
+    if(g_cart_n[axis] < 0){                                  /* build once per axis, then cache */
         /* Build into a temp sized to the EXACT token count (not the caller's cap), so a
          * collab-heavy library can't truncate before dedup. mdb_split_artists splits on
          * ',' / ';' capped at 8/song, so count separators (+1), capped at 8. */
         long maxtok = 0;
         for(int i=0;i<g_n;i++){
-            int c=1; for(const char *p=song_group_src(&g_songs[i]); *p; p++) if(*p==','||*p==';') c++;
+            int c=1; for(const char *p=song_group_src(&g_songs[i], axis); *p; p++) if(*p==','||*p==';') c++;
             maxtok += c>8?8:c;
         }
         char (*buf)[MDB_STR] = malloc((size_t)(maxtok>0?maxtok:1) * MDB_STR);
@@ -502,7 +506,7 @@ int mdb_artists(char names[][MDB_STR], int cap){
         int n = 0;
         for(int i=0;i<g_n;i++){
             char toks[8][MDB_STR];
-            int t = song_artist_toks(&g_songs[i], toks, 8);
+            int t = song_artist_toks(&g_songs[i], axis, toks, 8);
             for(int k=0;k<t && n<maxtok;k++)
                 if(toks[k][0]) snprintf(buf[n++], MDB_STR, "%s", toks[k]);
         }
@@ -513,13 +517,13 @@ int mdb_artists(char names[][MDB_STR], int cap){
                 if(w != i) memcpy(buf[w], buf[i], MDB_STR);
                 w++;
             }
-        g_cart = malloc((size_t)(w>0?w:1) * MDB_STR);
-        if(g_cart){ if(w) memcpy(g_cart, buf, (size_t)w * MDB_STR); g_cart_n = w; }
+        g_cart[axis] = malloc((size_t)(w>0?w:1) * MDB_STR);
+        if(g_cart[axis]){ if(w) memcpy(g_cart[axis], buf, (size_t)w * MDB_STR); g_cart_n[axis] = w; }
         free(buf);
-        if(g_cart_n < 0) return 0;                           /* cache alloc failed: retry later */
+        if(g_cart_n[axis] < 0) return 0;                     /* cache alloc failed: retry later */
     }
-    int n = g_cart_n < cap ? g_cart_n : cap;                 /* cache hit -> instant copy */
-    if(n>0) memcpy(names, g_cart, (size_t)n * MDB_STR);
+    int n = g_cart_n[axis] < cap ? g_cart_n[axis] : cap;     /* cache hit -> instant copy */
+    if(n>0) memcpy(names, g_cart[axis], (size_t)n * MDB_STR);
     return n;
 }
 
@@ -564,11 +568,11 @@ int mdb_album_songs(const char *album, const mdb_song_t **out, int cap){
     return n;
 }
 
-int mdb_artist_songs(const char *artist, const mdb_song_t **out, int cap){
+int mdb_artist_songs(int axis, const char *artist, const mdb_song_t **out, int cap){
     int n = 0;
     for(int i=0;i<g_n && n<cap;i++){
         char toks[8][MDB_STR];
-        int t = song_artist_toks(&g_songs[i], toks, 8);
+        int t = song_artist_toks(&g_songs[i], axis, toks, 8);
         for(int k=0;k<t;k++) if(!strcasecmp(toks[k], artist)){ out[n++] = &g_songs[i]; break; }
     }
     return n;
@@ -582,7 +586,7 @@ int mdb_artist_songs(const char *artist, const mdb_song_t **out, int cap){
  * credited "A, B" puts the album under both A and B. Tracks with no ALBUM tag are
  * not represented here; the caller offers an "All Songs" row so they stay reachable.
  * Result is sorted by album name, case-insensitively. */
-int mdb_artist_albums(const char *artist, char names[][MDB_STR], int *counts, int cap){
+int mdb_artist_albums(int axis, const char *artist, char names[][MDB_STR], int *counts, int cap){
     if(!artist || !artist[0] || cap <= 0) return 0;
     /* collect this artist's albums (one entry per matching track), then sort+group */
     const char **tmp = malloc((size_t)(g_n>0?g_n:1) * sizeof(char*));
@@ -591,7 +595,7 @@ int mdb_artist_albums(const char *artist, char names[][MDB_STR], int *counts, in
     for(int i=0;i<g_n;i++){
         if(!g_songs[i].album[0]) continue;
         char toks[8][MDB_STR];
-        int t = song_artist_toks(&g_songs[i], toks, 8);
+        int t = song_artist_toks(&g_songs[i], axis, toks, 8);
         for(int k=0;k<t;k++)
             if(!strcasecmp(toks[k], artist)){ tmp[m++] = g_songs[i].album; break; }
     }

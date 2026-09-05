@@ -38,23 +38,31 @@ int               mdb_play_pos(int id, int list_type, const char *name);
  * Fills *out (title/artist/album/dur_ms/id), *pos_ms, *is_playing. 1 if found. */
 int               mdb_current_play(mdb_song_t *out, int *pos_ms, int *is_playing);
 
+/* Which name an artist list groups by. The Library offers both, because they answer
+ * different questions and neither is a superset of the other:
+ *   MDB_AR_TRACK - the raw ARTIST tag, comma/semicolon split. A guest on one track is
+ *                  findable under their own name ("Eminem" via a 50 Cent feature).
+ *   MDB_AR_ALBUM - ALBUM_ARTIST when the file has one, else ARTIST with a "feat." tail
+ *                  stripped. One row per album artist, so a rip does not list "50 Cent",
+ *                  "50 Cent feat. Eminem" and "50 Cent feat. Lloyd Banks" separately. */
+enum { MDB_AR_TRACK = 0, MDB_AR_ALBUM = 1, MDB_AR_AXES = 2 };
+
 /* Distinct albums (with a representative artist + track count). */
 int  mdb_albums(char names[][MDB_STR], char artists[][MDB_STR], int *counts, int cap);
-/* Distinct artists, with comma-separated artists split so a collab shows under
- * each individual name. Grouped by ALBUM_ARTIST where the file has one - see
- * song_group_src() in musicdb.c for why. */
-int  mdb_artists(char names[][MDB_STR], int cap);
+/* Distinct artists on the given axis (MDB_AR_TRACK / MDB_AR_ALBUM), comma-separated
+ * names split so a collab shows under each individual name. Cached per axis. */
+int  mdb_artists(int axis, char names[][MDB_STR], int cap);
 /* Distinct genres/tags (with track count). */
 int  mdb_genres(char names[][MDB_STR], int *counts, int cap);
 
 /* Albums an artist appears on, sorted by album name, each with the album's FULL track
  * count (opening a row shows the whole album). Drives Artist -> Albums -> Tracks. */
-int  mdb_artist_albums(const char *artist, char names[][MDB_STR], int *counts, int cap);
+int  mdb_artist_albums(int axis, const char *artist, char names[][MDB_STR], int *counts, int cap);
 
 /* Fill out[] with songs in an album / by an artist token / in a genre. Returns count.
  * mdb_album_songs returns DISC/TRACK order (the player's album order), not alphabetical. */
 int  mdb_album_songs(const char *album, const mdb_song_t **out, int cap);
-int  mdb_artist_songs(const char *artist, const mdb_song_t **out, int cap);
+int  mdb_artist_songs(int axis, const char *artist, const mdb_song_t **out, int cap);
 int  mdb_genre_songs(const char *genre, const mdb_song_t **out, int cap);
 
 /* Case-insensitive substring match on title/artist/album. Returns count. */
