@@ -107,10 +107,12 @@ music.
   adopted against, so a flash invalidates it - otherwise `/usr/data` surviving the flash would hand
   you back the build you already had).
   `python3 tests/s97check.py` runs the real S97 against a fake root across thirteen scenarios.
-  **Costs one final reflash to adopt:** S97 is in the read-only rootfs, so the device has to be
-  flashed once with the new one (carrying the newest `mq_ui`) before `--persist` does anything.
-  `--persist` detects an older S97 and refuses rather than silently arming a slot nothing reads.
-  **Device check needed:** after that flash, push with `--persist`, reboot, confirm it comes back.
+  **The enabling reflash is DONE** - 2026-09-05, `F001 SUCCESS` in 91 minutes, usbboot exit=0, the
+  same 2 factory bad blocks at [383, 716] skipped as on the first flash, 0 retries, flash verified.
+  The device carries the update-slot S97 and `mq_ui` sha `66ece70f` (manifest, embedded copy and
+  local build all verified identical before the write).
+  **Device check still needed:** turn on On-Device Updates, deploy with `--persist`, reboot, confirm
+  the pushed build survives. That single test is what closes this tier.
 
 ## Tier 5 - power
 

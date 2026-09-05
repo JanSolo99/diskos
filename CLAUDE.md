@@ -485,10 +485,15 @@ is kept at `/usr/data/mq_ui.prev`, turning the setting off reinstalls the FLASHE
 dropping to stock, and a reflash always beats a standing adoption. `python3 tests/s97check.py` runs
 the real S97 against a fake root across thirteen scenarios.
 
-**It costs one more reflash to adopt.** S97 lives in the read-only rootfs, so a device flashed
-before this existed has an S97 that ignores update slots entirely. Flash once more with the newest
-`mq_ui`, and UI changes stop needing a flash after that. `--persist` detects an older S97 and
-refuses rather than arming a slot nothing will read.
+**That reflash is DONE** (2026-09-05, `F001 SUCCESS`, 91 min, usbboot exit=0, the same 2 factory
+bad blocks at [383, 716] skipped as on the first flash, 0 retries). The device now carries the
+update-slot S97 and `mq_ui` sha `66ece70f`, so `--persist` should work from here. S97 lives in the
+read-only rootfs, which is why it took a flash to get there; `--persist` refuses against an older
+S97 rather than arming a slot nothing will read.
+
+**Still unproven on hardware:** that the device actually boots the adopted binary. The next device
+session should turn on On-Device Updates, deploy with `--persist`, reboot, and confirm - that is the
+one step that closes Tier 4.
 
 ### Known gaps, in rough order
 
