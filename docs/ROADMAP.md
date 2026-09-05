@@ -58,7 +58,9 @@ can edit its live queue with no rebuild and no IPC tag. See `docs/QUEUE_DESIGN.m
   sends a rebuild over it; only an explicit "play something new" replaces the queue.
 - [x] **UI** - done, commit `3d3b5f9`: long-press a song -> *Play next* / *Add to queue*; the
   Queue screen reads `LIST_SONG_0` directly and gained remove + clear. Album, artist and genre
-  rows now hold for *Play all* / *Add to queue* too. STILL TO DO: drag-to-reorder.
+  rows now hold for *Play all* / *Add to queue* too. Queue rows hold for *Move up* / *Move down* /
+  *Remove* - buttons rather than drag, because on a 360px round screen a vertical reorder drag is
+  indistinguishable from a scroll at the moment it starts.
 - [ ] **Fix "play all by artist"** [device to verify]. It still sends the player `list_type 2` +
   a name, and the player filters `WHERE ARTIST=?`, so an album-artist row plays fewer tracks
   than the UI lists. The MECHANISM to fix it now exists - `mdb_queue_append_ids()` builds the
@@ -75,7 +77,7 @@ can edit its live queue with no rebuild and no IPC tag. See `docs/QUEUE_DESIGN.m
 
 - [ ] **Folder browser** [device first]. `0408` = file/folder browse is string-verified. Probe
   it before building anything - the player may already do the work.
-- [ ] **Gapless** [device]. `0647` is wired to a setting; never verified that it works.
+- [x] **Gapless** - user-confirmed working on device 2026-09-05. `0647` does what the setting says.
 - [ ] **AirPlay** [device]. `mq_player` embeds a working stack; needs its trigger tag pinned.
   `docs/RE_CATALOGUE.md` names the exact next step. Genuinely useful, and already paid for.
 - [ ] **Resume correctness** [device]. `MEMORY_PLAY.POSITION` is never updated during playback

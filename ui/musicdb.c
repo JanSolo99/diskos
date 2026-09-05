@@ -850,6 +850,39 @@ int mdb_queue_insert_after(int after_id, const char *path){
     return ok;
 }
 
+int mdb_queue_swap(int id_a, int id_b){
+    if(id_a < 1 || id_b < 1 || id_a == id_b) return 0;
+    sqlite3 *d = db(); if(!d) return 0;
+    /* Both rows must exist, or "swap" would silently become "renumber one row"
+     * and leave a gap - which breaks the contiguity the player indexes by. */
+    sqlite3_stmt *st;
+    int have = 0;
+    if(sqlite3_prepare_v2(d, "SELECT COUNT(*) FROM LIST_SONG_0 WHERE ID IN (?,?);",
+                          -1, &st, NULL) == SQLITE_OK){
+        sqlite3_bind_int(st, 1, id_a);
+        sqlite3_bind_int(st, 2, id_b);
+        if(sqlite3_step(st) == SQLITE_ROW) have = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+    }
+    if(have != 2) return 0;
+
+    if(sqlite3_exec(d, "BEGIN IMMEDIATE;", 0, 0, 0) != SQLITE_OK) return 0;
+    /* Park one row on a negative ID first. ID is the primary key, so a direct
+     * A->B while B still exists would collide; negatives cannot collide with the
+     * positive rows, and SQLite allows a negative rowid. Same reasoning as the
+     * tail shift in mdb_queue_insert_after. */
+    char sql[128];
+    int ok = 1;
+    snprintf(sql, sizeof sql, "UPDATE LIST_SONG_0 SET ID=-1 WHERE ID=%d;", id_a);
+    ok = ok && (sqlite3_exec(d, sql, 0, 0, 0) == SQLITE_OK);
+    snprintf(sql, sizeof sql, "UPDATE LIST_SONG_0 SET ID=%d WHERE ID=%d;", id_a, id_b);
+    ok = ok && (sqlite3_exec(d, sql, 0, 0, 0) == SQLITE_OK);
+    snprintf(sql, sizeof sql, "UPDATE LIST_SONG_0 SET ID=%d WHERE ID=-1;", id_b);
+    ok = ok && (sqlite3_exec(d, sql, 0, 0, 0) == SQLITE_OK);
+    sqlite3_exec(d, ok ? "COMMIT;" : "ROLLBACK;", 0, 0, 0);
+    return ok;
+}
+
 int mdb_queue_remove(int id){
     if(id < 1) return 0;
     sqlite3 *d = db(); if(!d) return 0;

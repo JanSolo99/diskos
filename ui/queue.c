@@ -83,22 +83,117 @@ static void row_play_cb(lv_event_t *e)
     screen_show(SCR_NOWPLAYING);
 }
 
-/* Long-press removes. Deliberately not a swipe: the screen already uses
- * horizontal swipes for back-navigation, and a half-recognised swipe that
- * deletes a track is exactly the kind of surprise this UI should not have. */
-static void row_remove_cb(lv_event_t *e)
+/* ---- long-press a queue row -> Move up / Move down / Remove ----------------
+ * Buttons rather than drag-to-reorder. On a 360px round screen a vertical drag
+ * inside a vertically scrolling list is ambiguous by construction: every reorder
+ * drag starts life indistinguishable from a scroll, and resolving that with a
+ * hold-then-drag is a gesture people have to be taught. Two taps that always do
+ * what they say beat one gesture that sometimes scrolls the list instead.
+ *
+ * Swipe was rejected for the same family of reasons: horizontal swipes already
+ * mean back-navigation here, and a half-recognised swipe that deletes a track is
+ * exactly the surprise this UI should not have. */
+static lv_obj_t *g_rsheet;
+static int       g_rsheet_i;
+
+static void rsheet_close(void){ if(g_rsheet){ lv_obj_del(g_rsheet); g_rsheet = NULL; } }
+static void rsheet_bg_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) rsheet_close(); }
+
+/* delta -1 = towards the front of the queue, +1 = towards the back */
+static void rsheet_move(int delta)
 {
-    if(lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if(i < 0 || i >= g_nrows) return;
-    if(g_rows[i].id == g_playing_id){ ui_toast("That one is playing"); return; }
-    if(mdb_queue_remove(g_rows[i].id)){
+    if(g_rsheet_i < 0 || g_rsheet_i >= g_nrows){ rsheet_close(); return; }
+    int me = g_rows[g_rsheet_i].id;
+    int other = me + delta;
+    if(other < 1 || other > g_nrows){ ui_toast(delta < 0 ? "Already first" : "Already last"); rsheet_close(); return; }
+    /* Refuse anything involving the playing row. MEMORY_PLAY.MUSIC_ID points at it,
+     * so moving it would silently re-point resume at a different track - and moving
+     * something past the playhead would reorder music that has already been heard. */
+    if(me == g_playing_id || other == g_playing_id){
+        ui_toast("Can't move past what's playing");
+        rsheet_close();
+        return;
+    }
+    if(mdb_queue_swap(me, other)){
         ui_queue_take_ownership();
+        rsheet_close();
+        queue_refresh();
+    } else {
+        ui_toast("Couldn't move that");
+        rsheet_close();
+    }
+}
+static void rsheet_up_cb  (lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) rsheet_move(-1); }
+static void rsheet_down_cb(lv_event_t *e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) rsheet_move(+1); }
+
+static void rsheet_remove_cb(lv_event_t *e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if(g_rsheet_i < 0 || g_rsheet_i >= g_nrows){ rsheet_close(); return; }
+    if(g_rows[g_rsheet_i].id == g_playing_id){
+        ui_toast("That one is playing");
+        rsheet_close();
+        return;
+    }
+    if(mdb_queue_remove(g_rows[g_rsheet_i].id)){
+        ui_queue_take_ownership();
+        rsheet_close();
         ui_toast("Removed");
         queue_refresh();
     } else {
         ui_toast("Couldn't remove");
+        rsheet_close();
     }
+}
+
+static void rsheet_button(lv_obj_t *card, int y, const char *txt, lv_event_cb_t cb)
+{
+    lv_obj_t *b = lv_button_create(card);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_pos(b, 20, y);
+    lv_obj_set_size(b, 200, 40);
+    lv_obj_set_style_radius(b, 12, 0);
+    lv_obj_set_style_bg_color(b, th_fill3(), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(b, th_card_press(), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_center(l);
+    lv_obj_set_style_text_font(l, th_font(16), 0);
+    lv_obj_set_style_text_color(l, th_text(), 0);
+}
+
+static void row_remove_cb(lv_event_t *e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
+    if(g_rsheet) return;
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if(i < 0 || i >= g_nrows) return;
+    g_rsheet_i = i;
+
+    g_rsheet = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(g_rsheet);
+    lv_obj_set_size(g_rsheet, 360, 360);
+    lv_obj_set_pos(g_rsheet, 0, 0);
+    lv_obj_set_style_bg_color(g_rsheet, th_scrim(), 0);
+    lv_obj_set_style_bg_opa(g_rsheet, th_scrim_opa(), 0);
+    lv_obj_clear_flag(g_rsheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_rsheet, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_rsheet, rsheet_bg_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *card = lv_obj_create(g_rsheet);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, 240, 166);
+    lv_obj_center(card);
+    lv_obj_set_style_radius(card, 20, 0);
+    lv_obj_set_style_bg_color(card, th_card(), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    rsheet_button(card, 12,  "Move up",   rsheet_up_cb);
+    rsheet_button(card, 60,  "Move down", rsheet_down_cb);
+    rsheet_button(card, 108, "Remove",    rsheet_remove_cb);
 }
 
 static void clear_cb(lv_event_t *e)

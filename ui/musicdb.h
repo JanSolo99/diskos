@@ -116,6 +116,8 @@ int  mdb_queue_append(const char *path);    /* add to the end */
 int  mdb_queue_append_ids(const int *ids, int n);
 int  mdb_queue_insert_after(int after_id, const char *path);  /* "play next" when given the playing row */
 int  mdb_queue_remove(int id);              /* drop one row, closing the gap */
+/* Swap two rows' positions. Used for move-up / move-down; both ids must exist. */
+int  mdb_queue_swap(int id_a, int id_b);
 int  mdb_queue_clear_after(int id);         /* drop everything past `id` (keeps what is playing) */
 
 /* persistent per-song accent cache (0xRRGGBB; 0 = not computed). Survives reboot. */

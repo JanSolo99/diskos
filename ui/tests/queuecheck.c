@@ -135,6 +135,20 @@ int main(void){
     ck(mdb_queue_count() == 2, "only the playing row and what precedes it remain");
     ck(contiguous(d),          "IDs still contiguous after clear");
 
+    printf("\n-- move (swap adjacent rows) -----------------------------------------\n");
+    reset(d);
+    ck(mdb_queue_swap(3, 4) == 1, "swap rows 3 and 4 succeeds");
+    snapshot(d, snap, sizeof snap);
+    printf("     %s\n", snap);
+    ck(contiguous(d), "IDs still contiguous after a swap");
+    ck(strcmp(snap, "1:One,2:Two,3:Four,4:Three") == 0, "Three and Four traded places");
+    ck(mdb_queue_playing_id() == 2, "the playing row is untouched");
+    ck(mdb_queue_swap(3, 99) == 0, "swapping with a row that does not exist fails");
+    snapshot(d, snap, sizeof snap);
+    ck(strcmp(snap, "1:One,2:Two,3:Four,4:Three") == 0, "...and changed nothing");
+    ck(mdb_queue_swap(3, 3) == 0, "swapping a row with itself is refused");
+    ck(contiguous(d), "IDs still contiguous after the refused swaps");
+
     printf("\n-- bulk append (a whole album) ---------------------------------------\n");
     reset(d);
     {
