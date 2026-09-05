@@ -24,7 +24,7 @@ static lv_font_t s_appwfont;   /* montserrat_22 + weather-icon fallback */
 #define WI_BOLT  "\xEF\x83\xA7"   /* f0e7 bolt       */
 #define WI_SNOW  "\xEF\x8B\x9C"   /* f2dc snowflake-o*/
 
-static char g_wbuf[160];
+static char g_wbuf[200];
 static char g_loc[160];               /* percent-encoded location (set on main thread).
                                        * config VLEN caps weather_loc at ~47 bytes raw, so
                                        * worst-case %-encoding (47*3=141) fits with margin. */
@@ -59,7 +59,7 @@ static void *weather_thread(void *arg)
 {
     (void)arg;
     int fail = 1;    /* result of this fetch, published under the lock at the end */
-    char result[160] = {0};   /* built here; copied into g_wbuf UNDER the lock at publish (no torn reads) */
+    char result[200] = {0};   /* built here; copied into g_wbuf UNDER the lock at publish (no torn reads) */
     char line[256] = {0};
     char cmd[320];   /* fits "wget ... 'http://wttr.in/<g_loc≤141>?format=...' ..." */
     if (g_loc[0])
@@ -193,7 +193,7 @@ static void weather_app_refresh(void)
     if (g_app_w) {
         /* snapshot g_wbuf under the lock - the worker can be mid-write when the app screen
          * refreshes, which would otherwise show torn text */
-        char snap[160]; int wfail;
+        char snap[200]; int wfail;
         pthread_mutex_lock(&g_wx_mu);
         snprintf(snap, sizeof snap, "%s", g_wbuf);
         wfail = g_wfail;   /* snapshot the guarded flag under the SAME lock (was an unlocked read) */

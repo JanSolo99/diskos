@@ -83,7 +83,8 @@ static char g_curname[80];    /* basename of the file being read right now */
 int scanner_active(void){ pthread_mutex_lock(&g_mu); int a=g_active; pthread_mutex_unlock(&g_mu); return a; }
 void scanner_progress(int *done, int *total){
     pthread_mutex_lock(&g_mu);
-    if(done)*done=g_done; if(total)*total=g_total;
+    if(done) *done=g_done;
+    if(total) *total=g_total;
     pthread_mutex_unlock(&g_mu);
 }
 int scanner_take_finished(void){

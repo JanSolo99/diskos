@@ -84,7 +84,7 @@ int  mdb_playlist_rename(long pid, const char *name);
 int  mdb_playlist_delete(long pid);
 int  mdb_playlist_songs(long pid, mdb_song_t *out, int cap);
 int  mdb_playlist_count(long pid);
-/* scan a dir for *.m3u/*.m3u8 and import each new one as a playlist; returns # imported */
+/* scan a dir for .m3u and .m3u8 files and import each new one as a playlist; returns # imported */
 int  mdb_import_m3u_dir(const char *dir);
 /* import from the SD root + any case-insensitive Music/Playlist(s) subdir; returns # imported */
 int  mdb_import_m3u_sd(const char *root);

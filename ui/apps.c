@@ -24,7 +24,10 @@
 #define MAX_APPS 24
 
 LV_FONT_DECLARE(font_icons_28)          /* FontAwesome 28px: play-mode + app-tile glyphs */
+LV_FONT_DECLARE(font_weather16)         /* FontAwesome weather glyphs */
 #define LFM_ICON "\xEF\x88\x82"         /* f202 lastfm    -> Last.fm */
+#define WEATHER_SUN "\xEF\x86\x85"      /* f185 sun */
+#define WEATHER_CLOUD "\xEF\x83\x82"    /* f0c2 cloud */
 /* Settings/File reuse LV_SYMBOL_SETTINGS (f013) / LV_SYMBOL_FILE (f15b), now in this font */
 
 typedef struct { char name[64]; char exec[256]; } app_t;
@@ -40,16 +43,16 @@ static void scan_apps(void){
     while((de = readdir(d)) && g_napps < MAX_APPS){
         if(de->d_name[0] == '.') continue;
         app_t *a = &g_apps[g_napps];
-        snprintf(a->name, sizeof a->name, "%s", de->d_name);
-        snprintf(a->exec, sizeof a->exec, APPS_DIR "/%s/app", de->d_name);
-        char conf[320]; snprintf(conf, sizeof conf, APPS_DIR "/%s/app.conf", de->d_name);
+        snprintf(a->name, sizeof a->name, "%.63s", de->d_name);
+        snprintf(a->exec, sizeof a->exec, APPS_DIR "/%.220s/app", de->d_name);
+        char conf[320]; snprintf(conf, sizeof conf, APPS_DIR "/%.280s/app.conf", de->d_name);
         FILE *f = fopen(conf, "r");
         if(f){
             char line[320];
             while(fgets(line, sizeof line, f)){
                 char *nl = strpbrk(line, "\r\n"); if(nl) *nl = 0;   /* strip CRLF too (Windows-edited app.conf) */
-                if(!strncmp(line, "name=", 5)) snprintf(a->name, sizeof a->name, "%s", line+5);
-                else if(!strncmp(line, "exec=", 5)) snprintf(a->exec, sizeof a->exec, "%s", line+5);
+                if(!strncmp(line, "name=", 5)) snprintf(a->name, sizeof a->name, "%.63s", line+5);
+                else if(!strncmp(line, "exec=", 5)) snprintf(a->exec, sizeof a->exec, "%.255s", line+5);
             }
             fclose(f);
         }
@@ -88,11 +91,26 @@ static void make_tile(const char *icon, const lv_font_t *ifont, const char *name
     lv_obj_set_ext_click_area(r, 4);
     lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(r, cb, LV_EVENT_CLICKED, ud);
-    lv_obj_t *ic = lv_label_create(r);
-    lv_label_set_text(ic, icon);
-    lv_obj_set_style_text_font(ic, ifont, 0);
-    lv_obj_set_style_text_color(ic, th_text(), 0);
-    lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 22);
+    if(!strcmp(name, "Weather")){
+        /* The weather font has the two shapes needed for a cloud-and-sun mark, but
+         * not at the regular 28 px app-icon size. Layer the existing glyphs. */
+        lv_obj_t *sun = lv_label_create(r);
+        lv_label_set_text(sun, WEATHER_SUN);
+        lv_obj_set_style_text_font(sun, &font_weather16, 0);
+        lv_obj_set_style_text_color(sun, th_text(), 0);
+        lv_obj_set_pos(sun, 43, 22);
+        lv_obj_t *cloud = lv_label_create(r);
+        lv_label_set_text(cloud, WEATHER_CLOUD);
+        lv_obj_set_style_text_font(cloud, &font_weather16, 0);
+        lv_obj_set_style_text_color(cloud, th_text(), 0);
+        lv_obj_set_pos(cloud, 56, 31);
+    } else {
+        lv_obj_t *ic = lv_label_create(r);
+        lv_label_set_text(ic, icon);
+        lv_obj_set_style_text_font(ic, ifont, 0);
+        lv_obj_set_style_text_color(ic, th_text(), 0);
+        lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 22);
+    }
     lv_obj_t *l = lv_label_create(r);
     lv_label_set_text(l, name);
     lv_obj_set_style_text_font(l, th_font(14), 0);
@@ -117,7 +135,7 @@ void apps_reload(void){
     make_tile(LV_SYMBOL_USB,       th_font(28), "Mode",     mode_row_cb, NULL);
     make_tile(LV_SYMBOL_SETTINGS,  th_font(28), "EQ",       nav_row_cb, (void*)(uintptr_t)SCR_EQ);
     make_tile(LV_SYMBOL_REFRESH,   th_font(28), "Scan",     scan_row_cb, NULL);
-    make_tile(LV_SYMBOL_EYE_OPEN,  th_font(28), "Weather",  weather_row_cb, NULL);
+    make_tile(WEATHER_CLOUD,       &font_weather16, "Weather",  weather_row_cb, NULL);
     /* built-in: Last.fm scrobbling (the FA lastfm brand glyph) */
     make_tile(LFM_ICON, &font_icons_28, "Last.fm", lastfm_row_cb, NULL);
     /* homebrew apps from /usr/data/apps */

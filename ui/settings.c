@@ -242,7 +242,8 @@ static void apply_restart(int v){ (void)v;
  * LED driver enabled at its minimum (screen looks black but the backlight glows), so
  * we also toggle bl_power (0 = FB_BLANK_UNBLANK on, 4 = FB_BLANK_POWERDOWN off). */
 void ui_backlight(int v){
-    if(v < 0) v = 0; if(v > 40) v = 40;
+    if(v < 0) v = 0;
+    if(v > 40) v = 40;
     if(v > 0){                     /* set target level first, then power on (no flash) */
         FILE *f = fopen("/sys/class/backlight/backlight/brightness", "w");
         if(f){ fprintf(f, "%d", v); fclose(f); }
@@ -270,7 +271,8 @@ void settings_apply_startup(void){
 
 /* shared brightness API (used by Quick Settings too) - persists the value */
 void ui_set_brightness(int v){
-    if(v < 1) v = 1; if(v > 40) v = 40;
+    if(v < 1) v = 1;
+    if(v > 40) v = 40;
     apply_brightness(v);
     cfg_set_int("brightness", v);
 }

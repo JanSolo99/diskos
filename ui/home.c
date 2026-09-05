@@ -44,18 +44,6 @@ static void weather_event_cb(lv_event_t *e)
     if (t && t[0]) weather_app_open();
 }
 
-static void settings_event_cb(lv_event_t *e)
-{
-    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-
-    if (g_settings_cb) {
-        g_settings_cb();
-    } else {
-        /* Requested screen enum has no settings screen yet. */
-        screen_show(SCR_HOME);
-    }
-}
-
 /* Open the Home menu (the swipe-left panel). apps_reload() first so a newly
  * installed homebrew app shows up without a restart - same as the swipe path. */
 static void menu_open_cb(lv_event_t *e)
@@ -80,37 +68,6 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text,
     lv_obj_set_style_text_color(label, color, 0);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     return label;
-}
-
-static lv_obj_t *make_tile(lv_obj_t *parent, int x, int y, int w, const char *symbol,
-                           const char *text, lv_event_cb_t cb, void *user_data)
-{
-    lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_remove_style_all(btn);
-    lv_obj_set_pos(btn, x, y);
-    lv_obj_set_size(btn, w, 92);
-    lv_obj_set_style_radius(btn, 22, 0);
-    lv_obj_set_style_bg_color(btn, th_card(), 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_70, 0);
-    lv_obj_set_style_bg_color(btn, th_card_press(), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(btn, th_text(), 0);
-    lv_obj_set_style_border_opa(btn, LV_OPA_10, 0);
-    lv_obj_set_style_border_width(btn, 1, 0);
-    lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
-
-    lv_obj_t *ic = make_label(btn, symbol, th_font(24),
-                              th_text());
-    lv_obj_set_pos(ic, 0, 18);
-    lv_obj_set_width(ic, w);
-
-    lv_obj_t *title = make_label(btn, text, th_font(16),
-                                 th_text());
-    lv_obj_set_pos(title, 0, 54);
-    lv_obj_set_width(title, w);
-
-    return btn;
 }
 
 /* A wide rounded "pill" button: icon + label, left-aligned, vertically centered. */

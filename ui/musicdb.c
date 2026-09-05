@@ -883,8 +883,9 @@ static int song_resolve(const char *entry, char *out, int cap){
     /* escape LIKE metachars in the basename so a name like "10%_mix.mp3" can't wildcard-match the
      * wrong song; the leading "%/" stays a real wildcard (match any directory). */
     char base_esc[600]; { int j=0; for(const char *s=base; *s && j<(int)sizeof base_esc-2; s++){
-        if(*s=='%'||*s=='_'||*s=='\\') base_esc[j++]='\\'; base_esc[j++]=*s; } base_esc[j]=0; }
-    char like[600]; snprintf(like, sizeof like, "%%/%s", base_esc);
+        if(*s=='%'||*s=='_'||*s=='\\') { base_esc[j++]='\\'; }
+        base_esc[j++]=*s; } base_esc[j]=0; }
+    char like[700]; snprintf(like, sizeof like, "%%/%s", base_esc);
     if(sqlite3_prepare_v2(d, "SELECT PATH FROM SONG WHERE PATH LIKE ? ESCAPE '\\' LIMIT 1;", -1, &st, NULL) == SQLITE_OK){
         sqlite3_bind_text(st, 1, like, -1, SQLITE_STATIC);
         if(sqlite3_step(st) == SQLITE_ROW){ snprintf(out, cap, "%s", colt(st,0)); got = 1; }
@@ -901,10 +902,10 @@ static int song_resolve(const char *entry, char *out, int cap){
 static int import_m3u_file(const char *m3u_path){
     FILE *fp = fopen(m3u_path, "r"); if(!fp) return 0;
     const char *b = strrchr(m3u_path, '/'); b = b ? b+1 : m3u_path;
-    char name[160]; snprintf(name, sizeof name, "%s", b);
+    char name[600]; snprintf(name, sizeof name, "%s", b);
     char *dot = strrchr(name, '.'); if(dot) *dot = 0;
     if(playlist_id_by_name(name) > 0){ fclose(fp); return 0; }   /* already imported */
-    char dir[400]; snprintf(dir, sizeof dir, "%s", m3u_path);
+    char dir[600]; snprintf(dir, sizeof dir, "%s", m3u_path);
     char *sl = strrchr(dir, '/'); if(sl) *sl = 0; else dir[0] = 0;
     long pid = 0; int added = 0; char line[700];
     while(fgets(line, sizeof line, fp)){
@@ -914,7 +915,7 @@ static int import_m3u_file(const char *m3u_path){
         while(*p==' '||*p=='\t') p++;
         for(char *q=p; *q; q++) if(*q=='\\') *q='/';            /* Windows backslash -> '/' so paths resolve */
         if(!*p || *p=='#') continue;                            /* comment / #EXTINF / blank */
-        char entry[700];
+        char entry[1400];
         if(*p=='/') snprintf(entry, sizeof entry, "%s", p);
         else        snprintf(entry, sizeof entry, "%s/%s", dir, p);
         char songpath[700];
@@ -931,7 +932,7 @@ static int import_m3u_file(const char *m3u_path){
     fclose(fp);
     return added;
 }
-/* Scan a directory (one level) for *.m3u/*.m3u8 and import each new one.
+/* Scan a directory (one level) for .m3u and .m3u8 files and import each new one.
  * Returns the number of NEW playlists imported. */
 int mdb_import_m3u_dir(const char *dir){
     DIR *d = opendir(dir); if(!d) return 0;

@@ -585,7 +585,15 @@ static void lfm_handle_result(const lfm_result_t *r){
     case JOB_GET_SESSION:
         if(r->ok && !r->api.api_error && r->api.session_key[0]){
             if(strlen(r->api.session_key) < sizeof g_sk){
-                snprintf(g_sk,sizeof g_sk,"%s",r->api.session_key);
+                /* Copy EXACTLY the key. The guard above already proved it fits, so a
+                 * fixed-length memcpy of sizeof g_sk - 1 would drag in whatever bytes
+                 * follow the NUL in the 64-byte source - never read back, but this is
+                 * the session-key buffer and it should not hold stale credential
+                 * bytes. (snprintf here is not a truncation risk either, for the same
+                 * reason; any -Wstringop-truncation warning on it is a false positive.) */
+                size_t sklen = strlen(r->api.session_key);
+                memcpy(g_sk, r->api.session_key, sklen);
+                g_sk[sklen] = 0;
                 snprintf(g_user,sizeof g_user,"%s",r->api.username);
                 cfg_set_str(LFM_CFG_SK,g_sk); cfg_set_str(LFM_CFG_USER,g_user);
                 g_connected=1; g_auth_state=LFM_AUTH_OK;

@@ -116,14 +116,6 @@ static int g_seek_sx, g_seek_sy;   /* seek gesture press origin */
 static int g_seek_cand;            /* press landed on the ring band (seek candidate) */
 static int g_seek_on;              /* seek confirmed & actively scrubbing */
 
-static lv_color_t accent_from(const char *a, const char *b)
-{
-    unsigned h = 2166136261u;
-    for(const char *p = a; *p; p++) h = (h ^ (unsigned char)*p) * 16777619u;
-    for(const char *p = b; *p; p++) h = (h ^ (unsigned char)*p) * 16777619u;
-    return lv_color_hsv_to_rgb(h % 360, 65, 84);   /* no-art fallback: forced good S/V */
-}
-
 static void mmss(long ms, char *buf, size_t len)
 {
     if(ms < 0) ms = 0;
@@ -698,7 +690,8 @@ static int oklab2rgb(float L,float a,float b, int *R,int *G,int *B){
     for(int i=0;i<3;i++){
         float x=lin[i];
         if(x<-0.001f||x>1.001f) in=0;
-        if(x<0)x=0; if(x>1)x=1;
+        if(x<0) x=0;
+        if(x>1) x=1;
         float v = x<=0.0031308f ? 12.92f*x : 1.055f*powf(x,1.0f/2.4f)-0.055f;
         *o[i] = (int)(v*255.0f+0.5f);
     }
@@ -1129,7 +1122,8 @@ static int pw_charging(void){
      * this driver). The old `status` read always failed -> prewarm mode "idle & charging" never ran. */
     long cur=0;
     FILE *f=fopen("/sys/class/power_supply/cw221X-bat/current_now","r"); if(!f) return 0;
-    if(fscanf(f,"%ld",&cur)!=1) cur=0; fclose(f);
+    if(fscanf(f,"%ld",&cur)!=1) cur=0;
+    fclose(f);
     return cur > 0;
 }
 /* 1 if the user-selected window currently allows background work. IDLE is mandatory
@@ -1715,7 +1709,8 @@ void ui_show_volume(int vol)
         g_vol_timer = lv_timer_create(vol_hide_cb, 1800, NULL);
         lv_timer_pause(g_vol_timer);
     }
-    if(vol < 0) vol = 0; if(vol > VOL_MAX) vol = VOL_MAX;
+    if(vol < 0) vol = 0;
+    if(vol > VOL_MAX) vol = VOL_MAX;
     /* Don't yank the arc out from under an active finger drag: while the arc is
      * pressed, vol_arc_cb already tracks the live value, and a lagging a714 echo
      * would jump it back. Skip the programmatic value/number set in that case. */

@@ -30,7 +30,7 @@ static lv_obj_t *g_sw, *g_list, *g_info_list;
 static lv_timer_t *g_scan_timer;
 static lv_timer_t *g_bt_autoroute_timer;
 static char g_sel_mac[20];     /* device selected for the details screen */
-static char g_bt_autorouted[20];
+static char g_bt_autorouted[32];
 
 static void start_scan(void);             /* fwd */
 static void scan_timer_cb(lv_timer_t *t);  /* fwd */
@@ -262,7 +262,8 @@ static int bt_dev_connected(const char *mac){
         char *nl = strchr(l, '\n'); if(nl) *nl = 0;
         char *p = l; while(*p == ' ' || *p == '\t') p++;
         if(!strncmp(p, "Connected:", 10)) return strstr(p, "yes") != NULL;
-        if(!nl) break; l = nl + 1;
+        if(!nl) break;
+        l = nl + 1;
     }
     return 0;
 }
