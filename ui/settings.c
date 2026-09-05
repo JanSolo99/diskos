@@ -120,6 +120,7 @@ void settings_seed_charge_protect(void){
 
 static void apply_open_colorpick(int v){ (void)v; colorpick_open(); }   /* seed sliders from cfg + open */
 static void apply_debug_mode(int v){ (void)v; debug_open(); }           /* Settings -> System -> Debug Mode */
+static void apply_about(int v){ (void)v; screen_show(SCR_ABOUT); }      /* Settings -> System -> About */
 
 /* Settings -> System -> On-Device Updates.
  *
@@ -466,8 +467,10 @@ static const setting_t TABLE[] = {
       "Enable SSH (random password) + a USB serial root shell for debugging. Off by default.", NULL },
     { "System",   "Temperature", ST_READONLY, NULL, 0,0,0, NULL,0, "@temp", NULL, 0,
       "Battery/board temperature from the fuel gauge (this SoC exposes no core sensor).", NULL },
-    { "System",   "About",       ST_READONLY, NULL, 0,0,0, NULL,0, "diskOS beta", NULL, 0,
-      "diskOS - a custom music player UI.", NULL },
+    { "System",   "About",       ST_ACTION, NULL, 0,0,0, NULL,0, LV_SYMBOL_RIGHT, apply_about, 0,
+      "Version, build stamp, player firmware and whether on-device updates are on. Check "
+      "Build first when a change seems to have done nothing: if the number did not move, "
+      "the device is still running the old binary and the problem is the deploy.", NULL },
 };
 #define N_SETTINGS ((int)(sizeof(TABLE)/sizeof(TABLE[0])))
 

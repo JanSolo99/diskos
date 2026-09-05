@@ -6,7 +6,7 @@
 #include "ipc.h"
 #include "theme.h"   /* palette + font tokens: every screen paints from these */
 #include <stdbool.h>
-enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTINGS_GROUP, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_SCAN, SCR_FONTPICK, SCR_QUEUE, SCR_COUNT };
+enum { SCR_HOME, SCR_LIBRARY, SCR_NOWPLAYING, SCR_SETTINGS, SCR_SETTINGS_GROUP, SCR_SETTING_DETAIL, SCR_SEARCH, SCR_SAVER, SCR_QUICK, SCR_SONGINFO, SCR_NPMENU, SCR_TUNE, SCR_EQ, SCR_APPS, SCR_NPHUB, SCR_PLPICK, SCR_PLVIEW, SCR_WIFI, SCR_WIFI_INFO, SCR_BT, SCR_BT_INFO, SCR_WEATHER, SCR_LYRICS, SCR_COLORPICK, SCR_LASTFM, SCR_WORKMODE, SCR_DEBUG, SCR_SCAN, SCR_FONTPICK, SCR_QUEUE, SCR_ABOUT, SCR_COUNT };
 void screens_init(void);
 void screen_show(int which);
 void screen_back(void);
@@ -29,6 +29,9 @@ void quicksettings_refresh(int playing);
 void songinfo_create(lv_obj_t *root);
 void songinfo_set(const track_state_t *st);
 void songinfo_refresh(void);   /* screen entry: fill Year/Bitrate from song.db */
+/* about (about.c) */
+void about_create(lv_obj_t *root);
+void about_refresh(void);      /* screen entry: firmware string + the updates flag */
 /* Now Playing side menus (npmenus.c) + custom EQ (eqcustom.c) */
 void npmenu_create(lv_obj_t *root);
 void nphub_create(lv_obj_t *root);   /* right-swipe hub: Playback + Options buttons */

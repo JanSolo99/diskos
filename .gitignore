@@ -15,6 +15,9 @@ diskos_v209_recovery.bin
 *_recovery.bin
 *.squashfs
 
+# --- generated at build time (a UTC stamp; see the buildid.h rule in ui/Makefile) ---
+ui/buildid.h
+
 # --- retired unlicensed blob ---
 _retired_unlicensed/
 

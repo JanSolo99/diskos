@@ -16,11 +16,29 @@ LDFLAGS := -static -pthread
 LDLIBS  := -lm -lrt
 
 LVGL_SRCS := $(shell find $(LVGL)/src -name "*.c")
-APP_SRCS  := $(APP)/main.c $(APP)/theme.c $(APP)/fb_pan.c $(APP)/ipc.c $(APP)/ui.c $(APP)/art.c $(APP)/screenmgr.c $(APP)/home.c $(APP)/library.c $(APP)/musicdb.c $(APP)/settings.c $(APP)/config.c $(APP)/anim.c $(APP)/search.c $(APP)/saver.c $(APP)/quicksettings.c $(APP)/songinfo.c $(APP)/npmenus.c $(APP)/eqcustom.c $(APP)/apps.c $(APP)/kbinput.c $(APP)/playlistview.c $(APP)/artcache.c $(APP)/colorpick.c $(APP)/debug_ui.c $(APP)/modes.c $(APP)/wifi.c $(APP)/bt.c $(APP)/weather.c $(APP)/lyrics.c $(APP)/toast.c $(APP)/lastfm.c $(APP)/lastfm_ui.c $(APP)/md5.c $(APP)/scanner.c $(APP)/scanview.c $(APP)/fontpick.c $(APP)/sysconfig.c $(APP)/fileutil.c $(APP)/txtfold.c $(APP)/fwcaps.c $(APP)/queue.c $(APP)/font_icons_28.c $(APP)/font_weather16.c
+APP_SRCS  := $(APP)/main.c $(APP)/theme.c $(APP)/fb_pan.c $(APP)/ipc.c $(APP)/ui.c $(APP)/art.c $(APP)/screenmgr.c $(APP)/home.c $(APP)/library.c $(APP)/musicdb.c $(APP)/settings.c $(APP)/config.c $(APP)/anim.c $(APP)/search.c $(APP)/saver.c $(APP)/quicksettings.c $(APP)/songinfo.c $(APP)/npmenus.c $(APP)/eqcustom.c $(APP)/apps.c $(APP)/kbinput.c $(APP)/playlistview.c $(APP)/artcache.c $(APP)/colorpick.c $(APP)/debug_ui.c $(APP)/modes.c $(APP)/wifi.c $(APP)/bt.c $(APP)/weather.c $(APP)/lyrics.c $(APP)/toast.c $(APP)/lastfm.c $(APP)/lastfm_ui.c $(APP)/md5.c $(APP)/scanner.c $(APP)/scanview.c $(APP)/fontpick.c $(APP)/sysconfig.c $(APP)/fileutil.c $(APP)/txtfold.c $(APP)/fwcaps.c $(APP)/queue.c $(APP)/about.c $(APP)/font_icons_28.c $(APP)/font_weather16.c
 # bundled SQLite amalgamation (compiled in-process; replaces popen sqlite3 CLI)
 SQLITE_FLAGS := -Os -pipe -static -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION \
   -DSQLITE_DEFAULT_MEMSTATUS=0 -DSQLITE_DQS=0 -DSQLITE_OMIT_DEPRECATED
 OBJS := $(LVGL_SRCS:.c=.o) $(APP_SRCS:.c=.o) $(APP)/sqlite3.o
+
+# A build stamp, so the device can SAY which build it is running. Two of the entries in
+# CLAUDE.md's symptom table are "my change did nothing" turning out to be the wrong
+# binary on the device; this makes that answerable by looking at the screen instead of
+# hashing the binary over SSH.
+#
+# Regenerated on every make but rewritten ONLY when the value changes, so it costs one
+# recompile of settings.c per real build and nothing on a no-op make. A plain UTC
+# timestamp rather than a git SHA: the Docker builder bind-mounts ui/ alone, so there is
+# no .git in the container to read, and a timestamp differs for uncommitted work too -
+# which is exactly the case you are trying to tell apart.
+.PHONY: FORCE
+FORCE:
+$(APP)/buildid.h: FORCE
+	@id=`date -u +%Y%m%d-%H%M`; \
+	 echo "#define DISKOS_BUILD \"$$id\"" > $@.tmp; \
+	 cmp -s $@.tmp $@ 2>/dev/null || mv -f $@.tmp $@; rm -f $@.tmp
+$(APP)/about.o: $(APP)/buildid.h
 
 mq_ui: $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
