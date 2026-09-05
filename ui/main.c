@@ -70,6 +70,13 @@ int ui_get_swipe_thresh(void){ return g_swipe_thresh; }
  * _Atomic: written here (main thread), read by the prewarm worker thread. */
 static _Atomic int g_bl_idle = 0;
 int ui_main_is_idle(void){ return g_bl_idle; }
+/* g_bl_idle covers dimmed OR off. This is the stricter one: the LED driver is
+ * powered down (bl_power=4) and NOTHING on screen can be seen, so any work done
+ * to update it is pure waste - a wake, a render and a framebuffer flush against
+ * a black panel. ui_vinyl_spin was already gated this way; the clock and the
+ * analog saver hands were not. */
+static _Atomic int g_bl_off = 0;
+int ui_screen_is_off(void){ return g_bl_off; }
 void ui_apply_swipe_thresh(int px){   /* live, no flash write */
     if(px < 20) px = 20;
     if(px > 200) px = 200;
@@ -111,6 +118,11 @@ static void clock_tick(lv_timer_t *t){
         if(hm[0]=='0') memmove(hm, hm+1, strlen(hm)); /* drop leading zero */
     }
     strftime(date, sizeof date, "%a %d %b", &lt);
+    /* Nothing is visible, so setting label text here would invalidate, render and
+     * flush for no one. The loop calls ui_clock_refresh() on wake, and the saver
+     * re-syncs via saver_show_sync() when it is shown, so neither can come back
+     * displaying a stale time. */
+    if(ui_screen_is_off()) return;
     home_set_clock(hm, date);
     saver_set_clock(hm, date);
 }
@@ -1720,6 +1732,7 @@ int main(int argc, char **argv){
     int woke = 0;   /* a press that only wakes the saver is swallowed */
     int bl_state = 0;   /* 0 = normal, 1 = saver-dim, 2 = off */
     unsigned last_vol_seq = 0;
+    int last_bl_state = 0;   /* to catch the screen-off -> on edge exactly once */
     /* Start the boot splash HERE - after all the blocking startup init (hwclock, bt_boot_restore,
      * IPC connect, etc.). Created earlier, its time-based animation would elapse during that
      * blocking init (the loop isn't ticking yet) and get skipped. Here it animates cleanly in the
@@ -2058,8 +2071,14 @@ int main(int argc, char **argv){
         /* screen fully off (pocket playback): pause the frequent polls + idle longer
          * so the loop wakes ~5x/s (touch poll) instead of ~33x/s. Derived from
          * bl_state each iteration so every wake path is covered. */
+        /* Coming back from a powered-down panel: the clock stopped being pushed while
+         * it was off (clock_tick above), so refresh it once here rather than adding a
+         * call to each of the several wake paths - volume, power key, touch, saver. */
+        if(last_bl_state == 2 && bl_state != 2) ui_clock_refresh();
+        last_bl_state = bl_state;
         polls_set_paused(bl_state == 2);
         g_bl_idle = (bl_state >= 1);   /* prewarm worker reads this: only work while dimmed/off */
+        g_bl_off  = (bl_state == 2);   /* panel powered down: skip work nobody can see */
         int busy = lv_anim_count_running() > 0 || prev_ts == LV_INDEV_STATE_PRESSED;
         if(bl_state == 2 && !busy){
             /* deep idle: OVERRIDE LVGL's ~33ms indev wait (cap is only an upper bound). At 60ms a

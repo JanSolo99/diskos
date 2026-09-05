@@ -192,6 +192,7 @@ void ui_set_accent_config(int mode, int rgb);  /* 0=dynamic / 1=static(rgb); app
 int  ui_accent_is_static(void);
 void ui_set_prewarm_mode(int m);          /* 0=off 1=idle 2=charging 3=idle|charging */
 int  ui_main_is_idle(void);               /* main.c: 1 when the screen is dimmed/off (no active use) */
+int  ui_screen_is_off(void);   /* 1 when the panel is powered down (bl_power=4) */
 const lv_font_t *ui_font_cjk(int size);   /* shared montserrat + Source Han Sans fallback user-text font (14/16/20) */
 int  ui_take_art_applied(void);           /* 1 once after art (re)applied -> re-push surfaces */
 int  ui_np_seek_press(int x, int y);

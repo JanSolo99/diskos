@@ -33,15 +33,16 @@ These are the operations you touch every minute. Everything else is secondary to
 - [ ] **Verify the outstanding fix set** [device]. One deploy + rescan settles: apostrophes and
   accented names, album track order, artist grouping, the Menu grid, scroll memory, and the
   Now Playing progress flash. All built and host-tested; none confirmed on hardware.
-- [ ] **Fold the remaining runtime text** [host]. Wi-Fi SSIDs (`wifi.c`), Bluetooth device names
-  (`bt.c`), fetched lyrics (`lyrics.c`), filenames during a scan (`scanview.c`), homebrew app
-  names (`apps.c`). Each is a one-line `txt_fold_ascii()` at the display point. Cheap, and the
-  same black-box bug is waiting in every one of them.
-- [ ] **Scanner: real `DURATION`** [host]. Still unwritten, so track lengths and the progress
-  bar depend entirely on the player. Also year, bitrate, and `ADD_TIME` (currently a hardcoded
-  constant, so "recently added" is meaningless).
-- [ ] **`diagcheck` redaction bug** [host]. Pre-existing: `diag.redact()` collapses the home
-  path to `~` before the `<user>` rule can fire, so that test is only green for root.
+- [x] **Fold the remaining runtime text** - `07c8b16`. Wi-Fi SSIDs, Bluetooth device names,
+  fetched lyrics, filenames during a scan, and homebrew app names all fold now. SSIDs and BT
+  names fold into a COPY: the original is the key we match on and has to stay byte-exact.
+- [x] **Scanner: real `DURATION`** - `00192f0`. FLAC reads it exactly from STREAMINFO; MP3 takes
+  the ID3 TLEN frame. Track lengths in the Library had been blank since the scanner was written.
+- [ ] **Scanner: year, bitrate, `ADD_TIME`** [host]. Still unwritten. `ADD_TIME` is a hardcoded
+  constant, so "Recently Added" is meaningless until it holds a real timestamp.
+- [x] **`diagcheck` redaction bug** - `6ac38b6`. The implementation was right and the test was
+  wrong; it only ever passed for root. Now asserts the property (no username survives) rather
+  than which of the two rules happened to fire.
 
 ## Tier 2 - the play queue (in flight)
 
@@ -49,10 +50,11 @@ Route B is **confirmed on hardware**: the player re-reads `LIST_SONG_0` as it ad
 can edit its live queue with no rebuild and no IPC tag. See `docs/QUEUE_DESIGN.md`.
 
 - [x] Write layer - append / insert-after / remove / clear, with `tests/queuecheck.c`.
-- [ ] **Scope ownership** [host]. A Library tap currently sends a rebuild that wipes the queue.
-  Needs the `Q:` sentinel so a user-built queue is never silently destroyed.
-- [ ] **UI** [host]. Long-press any track -> *Play next* / *Add to queue*; album and artist rows
-  get *Add to queue* for the whole scope; the Queue screen gains remove, reorder and clear.
+- [x] **Scope ownership** - `3d3b5f9`. The `Q:` sentinel marks the list as the user's, so nothing
+  sends a rebuild over it; only an explicit "play something new" replaces the queue.
+- [x] **UI** - done, commit `3d3b5f9`: long-press a song -> *Play next* / *Add to queue*; the
+  Queue screen reads `LIST_SONG_0` directly and gained remove + clear. STILL TO DO: *Add to
+  queue* on album/artist rows (whole scope), and drag-to-reorder.
 - [ ] **Fix "play all by artist"** [host]. Today it sends the player `list_type 2` + a name and
   the player filters `WHERE ARTIST=?`, so an album-artist row queues fewer tracks than the UI
   lists. Now that we can write `LIST_SONG_0` ourselves, we can build the exact list instead -
@@ -90,8 +92,8 @@ top of `docs/POWER_OPTIMIZATION_PLAN.md`.
 - [x] BT auto-route `popen` on the LVGL thread every 3s - fixed in `2db5f3c`.
 - [ ] **Wi-Fi policy** [host]. On by default, no screen-off or idle-off policy. The radio is a
   real current draw where the UI loop is not.
-- [ ] **Stop rendering to a dark panel** [host]. The clock push and analog saver still
-  invalidate and flush while `bl_power=4`.
+- [x] **Stop rendering to a dark panel** - done: `ui_screen_is_off()` now gates the 10s clock
+  push and the 1 Hz analog-saver hands, matching how `ui_vinyl_spin` was already gated.
 - [ ] ~~Main loop 30ms floor~~ **DEPRIORITISED.** Measured: `mq_ui` idles at ~0.5% of one core.
   The wakeups are real but the cost is not; `core_timerevent` at ~490/s is the audio path, not
   us. Accurately described in the plan, worth almost nothing to fix.
@@ -107,10 +109,13 @@ top of `docs/POWER_OPTIMIZATION_PLAN.md`.
 
 ## Suggested order
 
-1. **Tier 4** (on-device updates) - it pays for itself immediately.
-2. **Tier 0** key semantics - the biggest felt-quality win, and one RE session.
-3. **Tier 1** verification pass - one deploy + rescan closes a lot of open questions at once.
-4. **Tier 2** queue UI - the write layer is done and tested.
-5. Tier 3 and 5 as they earn it.
+1. **Tier 1 verification pass** - one deploy + rescan now closes a LOT at once: apostrophes,
+   album order, artist grouping, menu layout, scroll memory, track durations, and the whole
+   queue feature. This is the cheapest large step available.
+2. **Tier 4** (on-device updates) - it pays for itself immediately after that.
+3. **Tier 0** key semantics - the biggest felt-quality win, and one RE session.
+4. Tier 3 and the rest of Tier 5 as they earn it.
 
-Tiers 1, 2 and 5 have host-side work that can proceed in parallel with any device session.
+**Host-side work remaining** (no device needed): "play all by artist"; *Add to queue* on
+album/artist rows; drag-to-reorder in the queue; scanner year/bitrate/`ADD_TIME`; Wi-Fi
+idle-off policy.

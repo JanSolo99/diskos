@@ -170,7 +170,10 @@ static void set_hand(lv_obj_t *ln, lv_point_precise_t *pts, double deg, int len)
 static void saver_anim_cb(lv_timer_t *t)
 {
     (void)t;
-    if (g_style != 1 || screen_current() != SCR_SAVER) return;
+    /* The analog face redraws three vector hands every second. Behind a powered-down
+     * panel that is a wake, a render and a flush per second for something nobody can
+     * see - and this timer runs for the life of the process. */
+    if (g_style != 1 || screen_current() != SCR_SAVER || ui_screen_is_off()) return;
     time_t now = time(NULL); struct tm lt; localtime_r(&now, &lt);
     set_hand(g_hour, g_hpts, (lt.tm_hour % 12) * 30.0 + lt.tm_min * 0.5, 70);
     set_hand(g_min,  g_mpts, lt.tm_min * 6.0, 104);
