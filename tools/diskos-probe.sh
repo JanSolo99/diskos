@@ -94,8 +94,16 @@ else
   echo "/proc/config.gz absent - infer from timer_list below"
 fi
 echo
-echo "timer_list header:"
-head -20 /proc/timer_list 2>/dev/null || echo "(no /proc/timer_list)"
+echo "timer_list - tick/nohz state (the decisive lines):"
+# grep, not head: the nohz_mode / tick_stopped / jiffies fields appear per-CPU well
+# past the first 20 lines, and truncating before them was what made the first run
+# inconclusive. tick_sched_timer's next expiry lands on a round 10ms boundary when
+# HZ=100, which is the fallback inference if nohz_mode is absent entirely.
+grep -E 'nohz|tick_stopped|jiffies|tick_sched_timer|Timer List|^cpu:' /proc/timer_list 2>/dev/null | head -40 \
+  || echo "(no /proc/timer_list)"
+echo
+echo "next tick_sched_timer expiry (round 10ms boundary => HZ=100):"
+grep -A1 tick_sched_timer /proc/timer_list 2>/dev/null | head -4
 
 echo
 echo "--- 2. measured wake rate (10s sample) --------------------------------"
@@ -110,10 +118,17 @@ sleep 10
 cp /proc/interrupts /tmp/_irq1 2>/dev/null
 [ -n "$UIPID" ] && awk '{print $14, $15}' /proc/$UIPID/stat > /tmp/_cpu1 2>/dev/null
 echo
-echo "interrupt deltas over 10s (count/sec in the last column):"
+echo "interrupt deltas over 10s (a bare number tells you nothing - carry the NAME):"
 awk '
   NR==FNR { if (NF>2) { c[$1]=$2 } ; next }
-  NF>2 && $1 in c { d=$2-c[$1]; if (d>0) printf "  %-12s %8d   %7.1f/s\n", $1, d, d/10.0 }
+  NF>2 && $1 in c {
+    d=$2-c[$1];
+    if (d>0) {
+      name="";
+      for (i=3; i<=NF; i++) if ($i !~ /^[0-9]+$/) name = name " " $i;
+      printf "  %-8s %8d %8.1f/s  %s\n", $1, d, d/10.0, name
+    }
+  }
 ' /tmp/_irq0 /tmp/_irq1 2>/dev/null || echo "  (could not diff /proc/interrupts)"
 if [ -n "$UIPID" ] && [ -r /tmp/_cpu0 ]; then
   U0=$(awk '{print $1}' /tmp/_cpu0); S0=$(awk '{print $2}' /tmp/_cpu0)
@@ -128,7 +143,10 @@ echo "--- 3. QUEUE P1: what is actually in LIST_SONG_0 ----------------------"
 echo "schema:"
 q ".schema LIST_SONG_0"
 echo
-echo "row counts:  LIST_SONG_0=$(q 'SELECT COUNT(*) FROM LIST_SONG_0;')  LIST_SONG_1=$(q 'SELECT COUNT(*) FROM LIST_SONG_1;')  LIST_SONG_2=$(q 'SELECT COUNT(*) FROM LIST_SONG_2;')  SONG=$(q 'SELECT COUNT(*) FROM SONG;')"
+echo "row counts:  LIST_SONG_0=$(q 'SELECT COUNT(*) FROM LIST_SONG_0;')  SONG=$(q 'SELECT COUNT(*) FROM SONG;')"
+echo "(LIST_SONG_1/2 are documented for V2.09 but do NOT exist on V2.28 - listing what does:)"
+q "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;" | tr '\n' ' '
+echo
 echo
 echo "first 25 rows (ID | LIST_ID | POS_ID | DISC | TRACK | TITLE):"
 q "SELECT ID||' | '||IFNULL(LIST_ID,'-')||' | '||IFNULL(POS_ID,'-')||' | '||IFNULL(DISC,'-')||' | '||IFNULL(TRACK,'-')||' | '||IFNULL(TITLE,'-') FROM LIST_SONG_0 ORDER BY ID LIMIT 25;"
@@ -138,10 +156,15 @@ q "SELECT 'ID  min='||MIN(ID)||' max='||MAX(ID)||' count='||COUNT(*) FROM LIST_S
 q "SELECT 'POS_ID min='||MIN(POS_ID)||' max='||MAX(POS_ID) FROM LIST_SONG_0;"
 q "SELECT 'rows whose POS_ID matches a SONG.ID: '||COUNT(*) FROM LIST_SONG_0 l JOIN SONG s ON s.ID=l.POS_ID;"
 echo
-echo "MEMORY_PLAY (resume state - MUSIC_ID is the join key we must not break):"
+echo "MEMORY_PLAY schema (V2.28 has more columns than the V2.09 catalogue records):"
+q ".schema MEMORY_PLAY"
+echo "MEMORY_PLAY row:"
 q "SELECT * FROM MEMORY_PLAY;"
-echo "  -> the row MEMORY_PLAY.MUSIC_ID points at, via LIST_SONG_0.POS_ID:"
-q "SELECT 'POS_ID='||l.POS_ID||'  TITLE='||IFNULL(l.TITLE,'-') FROM LIST_SONG_0 l JOIN MEMORY_PLAY m ON m.MUSIC_ID=l.POS_ID;"
+echo "  -> what MUSIC_ID joins to. POS_ID came back NULL on V2.28, so ID is the"
+echo "     likely key; both are tested here rather than assumed:"
+q "SELECT 'via ID:     ID='||l.ID||'  TRACK='||IFNULL(l.TRACK,'-')||'  TITLE='||IFNULL(l.TITLE,'-') FROM LIST_SONG_0 l JOIN MEMORY_PLAY m ON m.MUSIC_ID=l.ID;"
+q "SELECT 'via POS_ID: POS_ID='||IFNULL(l.POS_ID,'NULL')||'  TITLE='||IFNULL(l.TITLE,'-') FROM LIST_SONG_0 l JOIN MEMORY_PLAY m ON m.MUSIC_ID=l.POS_ID;"
+echo "  (whichever prints a row is the join the player actually uses)"
 echo
 echo "PLAY_LIST (the queue registry):"
 q "SELECT * FROM PLAY_LIST;"

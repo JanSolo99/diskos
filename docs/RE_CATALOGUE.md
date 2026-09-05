@@ -268,6 +268,25 @@ PLAYLIST_INFO(ID) ON DELETE CASCADE`, `UNIQUE(PLAYLIST_ID,PATH,TRACK)`.
 
 ### LIST_SONG_0/1/2 (song.db) - active play queues, built by `INSERT INTO LIST_SONG_%d ... SELECT ... FROM SONG` (verified). Cols: ID · LIST_ID · POS_ID(=MUSIC_ID join key) · PATH · NAME · TITLE · ALBUM · ARTIST · GENRE · DISC · TRACK · IS_CUE · IS_ISO · OFFSET · DURATION · ADD_TIME · IS_SELECT · SONG_TYPE · ALBUM_ARTIST.
 
+**LIVE V2.28 DELTA (device-dumped 2026-09-05 via `tools/diskos-probe.sh`, supersedes the
+V2.09 reading above wherever they disagree):**
+- **Only `LIST_SONG_0` exists.** `LIST_SONG_1` and `LIST_SONG_2` are absent - `no such table`.
+- **Two extra trailing columns:** `... ALBUM_ARTIST TEXT, IS_M3U INT, M3U_PATH TEXT`.
+- **`LIST_ID` and `POS_ID` are both NULL** in every row the player builds. So `POS_ID` is
+  NOT the `MEMORY_PLAY.MUSIC_ID` join key on this firmware, and anything written here should
+  mirror the player and leave them NULL rather than inventing values.
+- **`MUSIC_ID` joins to `LIST_SONG_0.ID`.** Observed: a 5-row queue, `MEMORY_PLAY.MUSIC_ID=2`,
+  `MEMORY_PLAY.TRACK=2`, and `ID=2` is the album's track 2. ID is 1-based and contiguous,
+  which is also what `ui_play_list`'s `pos1-1` position jump indexes.
+- **`PLAY_LIST` is EMPTY** - it is not the queue registry on V2.28, whatever it was on V2.09.
+- **`MEMORY_PLAY` has more columns than the 7 documented** (a live row printed 8 values plus a
+  trailing empty field). Re-dump `.schema MEMORY_PLAY` before relying on field order.
+- The table tracks the CURRENT scope and nothing more: 5 rows for a 5-track album against
+  4821 rows in `SONG`. It is the live queue, not a full-library snapshot.
+- STILL UNKNOWN: whether the player re-reads this table during playback or caches it at build
+  time. `tools/diskos-probe.sh --marker <ID>` answers it; `docs/QUEUE_DESIGN.md` explains why
+  the whole queue design branches on the answer.
+
 ### MEMORY_PLAY (song.db) - resume state, single row. ID(=1) · MUSIC_ID · IS_PLAYING · POSITION · IS_CUE · IS_ISO · TRACK. **(UPDATE verified @mq_player.str:13412)**
 
 ### PEQ (song.db) - see §3. ID · STYLE_NAME · MASTER_GAIN(REAL) · PARAMS_JSON · STYLE_PRESET.
