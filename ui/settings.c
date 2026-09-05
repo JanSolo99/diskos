@@ -310,6 +310,14 @@ static const char *const OPT_REPLAYGAIN[] = { "Off", "Track", "Album" };
 static const char *const OPT_GAIN[]   = { "Low", "High" };
 static const char *const OPT_DFILTER[]= { "Fast LL","Slow LL","Slow PC","Fast PC","NOS","Wideband" };
 static const char *const OPT_MEMORY[] = { "Off", "Position", "Song" };
+/* keep in lockstep with MINS[] in wifi.c's wifi_idle_minutes() */
+static const char *const OPT_WIFI_IDLE[] = { "Never", "5 min", "15 min", "30 min" };
+static const char *const OPTD_WIFI_IDLE[] = {
+    "Wi-Fi stays on whenever you have switched it on.",
+    "Switch the radio off after 5 minutes with the screen off.",
+    "Switch the radio off after 15 minutes with the screen off (default).",
+    "Switch the radio off after 30 minutes with the screen off.",
+};
 static const char *const D_ARTCACHE[] = {
     "Album art loads as you play (default). No background work.",
     "Pre-decode all album art while the screen is off. Decoding can warm the player; it pauses automatically if it gets hot.",
@@ -391,6 +399,10 @@ static const setting_t TABLE[] = {
       "Swipe distance needed to go back. Lower is more sensitive.", NULL },
     { "Network",  "Wi-Fi",       ST_ACTION, NULL, 0,0,0, NULL,0, LV_SYMBOL_RIGHT, apply_wifi, 0,
       "Scan for and connect to Wi-Fi networks.", NULL },
+    { "Network",  "Wi-Fi Auto-Off", ST_CYCLER, "wifi_idle_off", 0,0,0, OPT_WIFI_IDLE, 4, NULL, NULL, 2,
+      "Switch the Wi-Fi radio off after this long with the screen off, and back on when you wake "
+      "it. The radio is one of the few things on this device that measurably costs battery - the "
+      "interface itself does not.", OPTD_WIFI_IDLE },
     { "Network",  "Bluetooth", ST_ACTION, NULL, 0,0,0, NULL,0, LV_SYMBOL_RIGHT, apply_bt, 0,
       "Pair Bluetooth devices. Audio still plays from the device (BT audio not yet enabled).", NULL },
     { "System",   "Sleep Timer", ST_CYCLER, "sleep_idx", 0,0,0, OPT_SLEEP, 6, NULL, apply_sleep, 0,

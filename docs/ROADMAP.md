@@ -30,16 +30,20 @@ These are the operations you touch every minute. Everything else is secondary to
 
 ## Tier 1 - correctness we already know about
 
-- [ ] **Verify the outstanding fix set** [device]. One deploy + rescan settles: apostrophes and
-  accented names, album track order, artist grouping, the Menu grid, scroll memory, and the
-  Now Playing progress flash. All built and host-tested; none confirmed on hardware.
+- [x] **Verify the outstanding fix set** - user-confirmed working on device 2026-09-05
+  ("all seems to work") after deploying the queue build. Covers apostrophes and accented names,
+  album track order, artist grouping, the Menu grid, scroll memory, and the queue itself.
+  Reported as a whole rather than item-by-item, so treat any single one as likely-good rather
+  than individually proven.
 - [x] **Fold the remaining runtime text** - `07c8b16`. Wi-Fi SSIDs, Bluetooth device names,
   fetched lyrics, filenames during a scan, and homebrew app names all fold now. SSIDs and BT
   names fold into a COPY: the original is the key we match on and has to stay byte-exact.
 - [x] **Scanner: real `DURATION`** - `00192f0`. FLAC reads it exactly from STREAMINFO; MP3 takes
   the ID3 TLEN frame. Track lengths in the Library had been blank since the scanner was written.
-- [ ] **Scanner: year, bitrate, `ADD_TIME`** [host]. Still unwritten. `ADD_TIME` is a hardcoded
-  constant, so "Recently Added" is meaningless until it holds a real timestamp.
+- [x] **Scanner: `ADD_TIME`** - `70fd409`. Now the file mtime, from the stat the walk already
+  does. Every row used to share one hardcoded constant, so "Recently Added" sorted by nothing.
+- [ ] **Scanner: year and bitrate** [host]. Still unwritten. Lower value than the rest - nothing
+  in the UI displays either yet.
 - [x] **`diagcheck` redaction bug** - `6ac38b6`. The implementation was right and the test was
   wrong; it only ever passed for root. Now asserts the property (no username survives) rather
   than which of the two rules happened to fire.
@@ -95,8 +99,10 @@ Measured on hardware 2026-09-05, which changed the priorities - see the verdict 
 top of `docs/POWER_OPTIMIZATION_PLAN.md`.
 
 - [x] BT auto-route `popen` on the LVGL thread every 3s - fixed in `2db5f3c`.
-- [ ] **Wi-Fi policy** [host]. On by default, no screen-off or idle-off policy. The radio is a
-  real current draw where the UI loop is not.
+- [x] **Wi-Fi policy** - Settings -> Network -> Wi-Fi Auto-Off (Never / 5 / 15 / 30 min,
+  default 15). Suspends the radio after that long with the screen off and restores it on wake.
+  Suspension is separate from the user's on/off intent, so the keepalive cannot undo it.
+  UNMEASURED: the benefit is inferred from the radio being a real draw, not from a battery test.
 - [x] **Stop rendering to a dark panel** - done: `ui_screen_is_off()` now gates the 10s clock
   push and the 1 Hz analog-saver hands, matching how `ui_vinyl_spin` was already gated.
 - [ ] ~~Main loop 30ms floor~~ **DEPRIORITISED.** Measured: `mq_ui` idles at ~0.5% of one core.

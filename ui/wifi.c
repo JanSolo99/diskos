@@ -29,6 +29,18 @@ static lv_timer_t *g_scan_timer;
 static lv_timer_t *g_conn_timer;      /* non-NULL while a user connect is being polled */
 static uint32_t    g_wifi_last_start = 0;   /* last wifi_up.sh launch (shared: toggle + keepalive) */
 static int         g_sanitize_pending = 1;  /* sanitize saved nets once the supplicant is up (set on 1st run + each (re)launch) */
+/* ---- idle auto-off ---------------------------------------------------------
+ * The radio is a real current draw where the UI loop measurably is not (see the
+ * hardware numbers in docs/POWER_OPTIMIZATION_PLAN.md), and pocket listening -
+ * screen off, music playing, nothing wanting the network - is the common case.
+ *
+ * SUSPENDED IS NOT OFF. cfg "wifi_on" is the user's INTENT and is never touched
+ * here; suspending is a separate, temporary state. That distinction matters
+ * because wifi_supervise() restarts the supplicant whenever intent says on and it
+ * is not running - without a separate flag, an auto-off would be undone within
+ * five seconds by the keepalive that exists to survive crashes. */
+static int         g_wifi_suspended = 0;    /* we turned it off; restore on wake */
+static uint32_t    g_wifi_idle_since = 0;   /* tick the screen went fully off, 0 = screen on */
 static char g_pending_ssid[64];   /* SSID awaiting a password from the keyboard */
 static char g_cur_ssid[64];       /* currently-connected SSID (to mark the list) */
 static lv_obj_t *g_info_list;     /* details screen */
@@ -162,6 +174,21 @@ void wifi_init_intent(void){
  * flag (set on first run + every launch we initiate, cleared after one run), so it's
  * deterministic and idempotent regardless of pid reuse or a transient pidof miss. Enforce a
  * deliberate OFF against a late in-flight wifi_up. Self-rate-limited: safe to call each loop. */
+/* Minutes of SCREEN-OFF after which the radio is suspended. 0 = never.
+ * Screen-off rather than "no traffic": we have no cheap way to observe traffic, and
+ * a dark screen the user is not touching is the honest proxy for "nobody is waiting
+ * on the network".
+ *
+ * cfg holds the cycler's INDEX, not the minutes - that is how every ST_CYCLER in
+ * settings.c stores its value - so map it here. Keep MINS in lockstep with
+ * OPT_WIFI_IDLE in settings.c. */
+static int wifi_idle_minutes(void){
+    static const int MINS[] = { 0, 5, 15, 30 };
+    int i = cfg_get_int("wifi_idle_off", 2);            /* index 2 = "15 min" */
+    if(i < 0 || i >= (int)(sizeof MINS / sizeof MINS[0])) i = 2;
+    return MINS[i];
+}
+
 void wifi_supervise(void){
     static uint32_t last_check = 0;
     static int      first = 1;
@@ -170,6 +197,34 @@ void wifi_supervise(void){
 
     int up   = wifi_radio_on();
     int want = cfg_get_int("wifi_on", 1);
+
+    /* ---- idle policy, evaluated before the keepalive below ---------------- */
+    int mins = wifi_idle_minutes();
+    if(ui_screen_is_off()){
+        if(!g_wifi_idle_since) g_wifi_idle_since = lv_tick_get();
+        if(mins > 0 && want && up && !g_wifi_suspended &&
+           lv_tick_elaps(g_wifi_idle_since) > (uint32_t)mins * 60000u){
+            g_wifi_suspended = 1;
+            /* BACKGROUNDED (&), like wifi_up.sh above and unlike the enforce-off
+             * branch below. This runs on the LVGL thread, and a wifi_down.sh that
+             * blocks would stall the interface - at worst long enough for the
+             * watchdog to notice. Its exit status is not needed: the flag above
+             * records the intent and the next tick re-reads the real radio state. */
+            system("/usr/bin/wifi_down.sh >/dev/null 2>&1 &");
+            fprintf(stderr, "wifi: suspended after %d min screen-off\n", mins);
+            return;                       /* nothing else to do this tick */
+        }
+    } else {
+        g_wifi_idle_since = 0;
+        if(g_wifi_suspended){
+            /* Screen is back: clear the flag and let the keepalive below bring the
+             * supplicant up on this same tick, rather than duplicating the launch
+             * (and its backoff and sanitize bookkeeping) here. */
+            g_wifi_suspended = 0;
+            fprintf(stderr, "wifi: resuming after screen-on\n");
+        }
+    }
+    if(g_wifi_suspended) return;          /* stay off until the screen comes back */
 
     /* re-enable all nets + clear freq locks + persist once the supplicant is up, unless a
      * user connect is mid-flight (conn_poll_cb sanitizes on its outcome). */
