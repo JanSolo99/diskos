@@ -409,7 +409,8 @@ restore point is saved). Built via the Docker toolchain inside WSL2 (see above),
 bad blocks correctly skipped. A plain power-on with no buttons held reaches diskOS, exactly as the
 Vol-Up rule above predicts. Home, Menu, library browsing and playback all work on hardware.
 
-Fixed from the first hardware session (all built + unit-tested, **none confirmed on device yet**):
+Fixed from the first hardware session (all built + unit-tested; what has and has not been seen
+on hardware is spelled out after the list):
 
 - `ui/txtfold.c` (new): the Montserrat faces cover U+0020..U+007E and the Source Han CJK fallback
   starts at U+3001, so **everything between - every curly apostrophe and every accented Latin
@@ -437,6 +438,21 @@ Fixed from the first hardware session (all built + unit-tested, **none confirmed
   sat at y=326 where the round screen gives only 210px of chord against a 266px row - the bottom row
   was clipped by the bezel. Now exactly two rows ending at y=296, with `LV_SCROLL_SNAP_START`.
 - `library.c`: per-view scroll memory, restored on BACK only (forward drills still start at top).
+- `library.c`: two follow-up bugs from the two-axis split, BOTH of which made a list look empty
+  instead of failing - worth knowing because the shape recurs:
+  - `add_row()` decides what a row CONTAINS with a `switch(g_view)`, and the new
+    `VIEW_ALBUM_ARTISTS` was added to every place that builds and routes the view but not to
+    the one that draws it. That switch has no `default:` and `add_row()` creates the row object
+    BEFORE it, so the miss neither crashed nor warned: the view queried correctly and rendered
+    the right NUMBER of completely blank rows. On device that reads as "the list is empty and a
+    rescan does not help", which sends you to the database - the one place the bug was not.
+    (`mdb_artists()` cannot return zero for a non-empty library: the album axis falls back to
+    `ARTIST` and the scanner guarantees at least "Unknown artist". A real data miss shows the
+    words "No artists found" instead. That is how you tell the two apart.)
+  - `library_open_artist()` (Now Playing -> 3-dot -> Artist) never set `g_ar_axis`, so it
+    inherited whichever axis was last browsed. `npmenus` hands it the raw `ARTIST` column, so
+    resolving it on the ALBUM axis matched nothing and gave "No songs by this artist". A
+    deep-link must set every piece of context it depends on.
 - `main.c`: volume keys are read straight off the GPB pin (bit 13/14), so the volume bar paints on
   the key edge instead of waiting for the player's a714 - the player grabs `event0` exclusively and
   sits on a single press watching for a double-press track skip. **Confirmed faster on device.**
@@ -444,8 +460,24 @@ Fixed from the first hardware session (all built + unit-tested, **none confirmed
   reply re-announces the song with a partial body, snapping the NP ring to the start for a frame).
   Hypothesis-driven - not yet confirmed against a captured a2 frame.
 
-Still unverified on hardware: theme switching, a library rescan, and everything in the list above
-except the volume fix.
+**What has actually been seen on hardware**, as distinct from built-and-tested:
+
+- The volume fix is confirmed faster on device.
+- A build carrying the two-axis Artists reached the device and ran - the "Album Artists" row
+  appeared in the Library menu - so the deploy path works and this change set has executed on
+  hardware. On that build the list itself rendered blank (the `add_row` bug above).
+- Reported on that same build and NOT yet re-tested since the later commits: an apostrophe still
+  drawing as a box, album tracks still alphabetical, and "feat." variants still splitting the
+  artist list. Each has a CANDIDATE cause that was fixed afterwards - respectively the
+  undrawable literals in our OWN strings, `DISC`/`TRACK` needing a rescan to populate, and
+  `strip_featuring()` not handling the bracketed "Artist (feat. Guest)" form. Those are
+  hypotheses, not diagnoses: none was reproduced against that exact build, and none of the
+  fixes has been on hardware yet. Re-test before assuming any of the three is closed.
+- Never yet exercised on device: theme switching, a library rescan, the menu-grid layout, the
+  scroll memory, and the Now Playing progress-flash fix.
+
+The honest summary: the deploy path is proven, the volume fix is proven, and everything else is
+waiting on one deploy-plus-rescan pass.
 
 Known gaps worth doing next, in rough order: the scanner still never writes `DURATION`, year or
 bitrate, and binds `ADD_TIME` to a hardcoded constant; there is no on-device update path (every
