@@ -349,7 +349,7 @@ static void add_row(int i){
             char cnt[12]; snprintf(cnt,sizeof cnt,"%d",g_gcounts[i]);
             row_two(r, g_gnames[i], g_gartists[i], cnt);
             break; }
-        case VIEW_ARTISTS:
+        case VIEW_ARTISTS: case VIEW_ALBUM_ARTISTS:
             lv_obj_add_event_cb(r, group_cb,      LV_EVENT_SHORT_CLICKED, (void*)(uintptr_t)i);
             lv_obj_add_event_cb(r, group_play_cb, LV_EVENT_LONG_PRESSED,  (void*)(uintptr_t)i);
             row_two(r, g_gnames[i], NULL, NULL);
@@ -692,6 +692,12 @@ void library_open_album(const char *name){
 }
 void library_open_artist(const char *name){
     g_view=VIEW_ARTIST_ALBUMS; g_drill_kind=0; g_deeplink=1;
+    /* PIN THE AXIS. npmenus' ctx_artist_cb hands us the raw ARTIST column, split only on
+     * comma/semicolon - a MDB_AR_TRACK name. Without this we would inherit whatever axis
+     * the user last browsed, and resolving a raw name like "50 Cent (feat. Eminem)" on the
+     * ALBUM axis matches nothing (that axis tokenises every song down to "50 Cent"), so the
+     * page came up "No songs by this artist". */
+    g_ar_axis = MDB_AR_TRACK;
     snprintf(g_artist, MDB_STR, "%s", name); library_reload();
 }
 
