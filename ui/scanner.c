@@ -47,6 +47,7 @@ typedef struct {
     char title[TAGLEN], artist[TAGLEN], album[TAGLEN], genre[TAGLEN];
     char album_artist[TAGLEN];   /* TPE2 / ALBUMARTIST / aART - empty when the file has none */
     int  disc, track;            /* 0 = unknown; sorts LAST, matching the player's ORDER BY */
+    long duration_ms;            /* 0 = unknown; the library shows a blank length for 0 */
 } tags_t;
 
 /* "7", "07", "7/12", " 7 " -> 7.  Unparseable or absent -> 0 (= unknown).
@@ -247,6 +248,11 @@ static int id3v2_read(FILE *f, tags_t *t){
                 else if(!strcmp(k,"TPE2")||!strcmp(k,"TP2")) snprintf(t->album_artist,TAGLEN,"%s",val);
                 else if(!strcmp(k,"TRCK")||!strcmp(k,"TRK")) t->track = tag_num(val);
                 else if(!strcmp(k,"TPOS")||!strcmp(k,"TPA")) t->disc  = tag_num(val);
+                /* TLEN is the track length in MILLISECONDS. Written by most taggers,
+                 * and free to read here - the alternative for MP3 is counting frames
+                 * or parsing a Xing header, neither of which is worth it while this
+                 * is present. Absent -> stays 0 -> the row shows a blank length. */
+                else if(!strcmp(k,"TLEN")||!strcmp(k,"TLE")) t->duration_ms = tag_num(val);
             }
         }
         p += fhdr + fsize;
@@ -302,6 +308,8 @@ static void vc_parse(const unsigned char *b, uint32_t len,
                     snprintf(t->album_artist, TAGLEN,"%s",v);
                 else if(!strcasecmp(k,"TRACKNUMBER") && !t->track) t->track = tag_num(v);
                 else if(!strcasecmp(k,"DISCNUMBER")  && !t->disc)  t->disc  = tag_num(v);
+                /* only a fallback: FLAC's STREAMINFO is exact and already ran */
+                else if(!strcasecmp(k,"LENGTH") && !t->duration_ms) t->duration_ms = tag_num(v);
             }
         }
         off += clen;
@@ -318,6 +326,20 @@ static void flac_read(FILE *f, tags_t *t){
         if(fread(h,1,4,f)!=4) return;
         int last = h[0]&0x80, type = h[0]&0x7f;
         uint32_t len = ((uint32_t)h[1]<<16)|((uint32_t)h[2]<<8)|h[3];
+        if(type==0 && len>=18 && !t->duration_ms){      /* STREAMINFO - exact duration */
+            /* Bytes 10..17 pack, big-endian: sample rate (20 bits), channels (3),
+             * bits per sample (5), then TOTAL SAMPLES (36). Duration is therefore
+             * exact for FLAC, not an estimate - no frame counting needed. */
+            unsigned char si[18];
+            if(fread(si,1,18,f)!=18) return;
+            uint32_t rate = ((uint32_t)si[10]<<12) | ((uint32_t)si[11]<<4) | (si[12]>>4);
+            uint64_t samples = ((uint64_t)(si[13] & 0x0F) << 32) | ((uint64_t)si[14] << 24) |
+                               ((uint64_t)si[15] << 16) | ((uint64_t)si[16] << 8) | si[17];
+            if(rate > 0 && samples > 0) t->duration_ms = (long)((samples * 1000ULL) / rate);
+            if(last) return;
+            if(fseek(f,(long)len - 18,SEEK_CUR)!=0) return;   /* skip the rest of the block */
+            continue;
+        }
         if(type==4){                                    /* VORBIS_COMMENT */
             if(len<8 || len>1024*1024) return;
             unsigned char *b=malloc(len); if(!b) return;
@@ -627,7 +649,7 @@ static const char *INS_SONG =
     /* EXPLICIT ?N parameters: SQLite numbers a bare '?' by order of appearance, so the
      * DISC/TRACK placeholders (columns 7-8) would otherwise renumber every bind after
      * them. Numbering them 13.. keeps bind_tags' contiguous 2..11 block untouched. */
-    "ALBUM_ARTIST_CODE) VALUES (?1,?2,?3,?4,?5,?6,?13,?14,0,0,0,0,0,?7,?8,?9,?10,?11,?12,0,0,0,0,'','',0,?15,?16);";
+    "ALBUM_ARTIST_CODE) VALUES (?1,?2,?3,?4,?5,?6,?13,?14,0,0,0,0,?17,?7,?8,?9,?10,?11,?12,0,0,0,0,'','',0,?15,?16);";
 /* MERGE (not delete+reinsert): UPDATE an existing PATH's metadata in place so its ID and ACCENT are
  * preserved - MEMORY_PLAY.MUSIC_ID (resume) and MY_LOVE.ID (favourites) are ID-keyed, so a delete+
  * reinsert with fresh autoincrement IDs used to break resume + favourites and wipe the art-accent cache
@@ -637,7 +659,7 @@ static const char *UPD_SONG =
     "NAME_CODE=?6,TITLE_CODE=?7,ALBUM_CODE=?8,ARTIST_CODE=?9,GENRE_CODE=?10,"
     /* rescanning an existing row must refresh these too, otherwise a library that
      * was indexed before diskOS read them would keep DISC/TRACK 0 for ever. */
-    "DISC=?12,TRACK=?13,ALBUM_ARTIST=?14,ALBUM_ARTIST_CODE=?15 WHERE PATH=?11;";
+    "DISC=?12,TRACK=?13,ALBUM_ARTIST=?14,ALBUM_ARTIST_CODE=?15,DURATION=?16 WHERE PATH=?11;";
 /* per-connection temp table of PATHs seen this scan; drives the post-walk delete of vanished songs. */
 static const char *SEEN_DDL = "CREATE TEMP TABLE IF NOT EXISTS seen(PATH TEXT PRIMARY KEY);";
 static const char *SEEN_INS = "INSERT OR IGNORE INTO seen(PATH) VALUES(?);";
@@ -682,6 +704,7 @@ static void bind_tags(sqlite3_stmt *s, int p0, const char *fname, const char *ti
 static void bind_extra(sqlite3_stmt *s, int p0, const tags_t *t){
     sqlite3_bind_int(s, p0+0, t->disc);
     sqlite3_bind_int(s, p0+1, t->track);
+    sqlite3_bind_int64(s, p0+4, (sqlite3_int64)t->duration_ms);
     if(t->album_artist[0]){
         sqlite3_bind_text(s, p0+2, t->album_artist, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int (s, p0+3, code4(t->album_artist));
@@ -716,7 +739,7 @@ static void upsert_song(const char *path, const char *fname){
     sqlite3_reset(g_upd); sqlite3_clear_bindings(g_upd);
     bind_tags(g_upd, 1, fname, t.title, t.album, t.artist, t.genre);
     sqlite3_bind_text(g_upd, 11, path, -1, SQLITE_TRANSIENT);
-    bind_extra(g_upd, 12, &t);                         /* 12=DISC 13=TRACK 14=ALBUM_ARTIST 15=code */
+    bind_extra(g_upd, 12, &t);              /* 12=DISC 13=TRACK 14=ALBUM_ARTIST 15=code 16=DURATION */
     if(sqlite3_step(g_upd)!=SQLITE_DONE){ g_scan_err=1; return; }
     if(sqlite3_changes(g_db) > 0){                     /* existing PATH updated in place */
         pthread_mutex_lock(&g_mu); g_done++; pthread_mutex_unlock(&g_mu);
@@ -727,7 +750,7 @@ static void upsert_song(const char *path, const char *fname){
     sqlite3_bind_text(g_ins, 1, path, -1, SQLITE_TRANSIENT);
     bind_tags(g_ins, 2, fname, t.title, t.album, t.artist, t.genre);
     sqlite3_bind_int64(g_ins, 12, (sqlite3_int64)1782180000);   /* ADD_TIME */
-    bind_extra(g_ins, 13, &t);                         /* 13=DISC 14=TRACK 15=ALBUM_ARTIST 16=code */
+    bind_extra(g_ins, 13, &t);              /* 13=DISC 14=TRACK 15=ALBUM_ARTIST 16=code 17=DURATION */
     if(sqlite3_step(g_ins)==SQLITE_DONE){ pthread_mutex_lock(&g_mu); g_done++; pthread_mutex_unlock(&g_mu); }
     else g_scan_err=1;   /* insert failure (disk full, DB corruption) must block the commit */
 }
