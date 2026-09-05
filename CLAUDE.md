@@ -243,6 +243,7 @@ cd ui && make fontcheck && ./fontcheck   # user-font path: LVGL VFS, icon fallba
 python3 tests/managercheck.py            # device reporting, restore-point lifecycle
 python3 tests/diagcheck.py               # redaction, run log, diagnostic report
 python3 tests/glyphcheck.py              # no UI string literal the device cannot draw
+cd ui && make queuecheck && ./queuecheck  # LIST_SONG_0 queue writes: order + contiguity
 ```
 
 `fontcheck` needs a real `.ttf` in `ui/tests/sdcard/Fonts/` and a WRITABLE `/usr/data`

@@ -24,3 +24,4 @@ config.mk
 # host test artifacts (see tests/README.md)
 fontcheck
 tests/sdcard/
+queuecheck

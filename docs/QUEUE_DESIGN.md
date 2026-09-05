@@ -1,6 +1,13 @@
 # Play queue - design and RE plan
 
-Status: **design, nothing implemented.** Written 2026-09-05.
+Status: **Route B CONFIRMED on hardware 2026-09-05. Design settled, implementation next.**
+
+> **P2 PASSED.** A row appended to `LIST_SONG_0` behind the player's back, while it was
+> playing, was picked up and played: the queue ran off its old end into "Brand New 911",
+> a track from a different album that the player never put there. **`mq_player` re-reads
+> `LIST_SONG_0` as it advances - it does not cache the list at build time.** Route B is
+> therefore real, and with it add-to-queue / play-next / reorder with no rebuild and no
+> new IPC tag. Probe: `tools/diskos-probe.sh --append`, device V2.28.
 
 The `Queue` screen that exists today (`ui/queue.c`, uncommitted) is a read-only mirror of
 whatever list the player already built, with tap-to-jump. This document specs the real
@@ -79,7 +86,10 @@ binary, **L** = live-tested on device, **I** = inferred from family, **U** = unk
 | `0117` = playlist reorder (src/dst) | V | RE_CATALOGUE section 8, Table B |
 | `0114` = custom-list delete | V | RE_CATALOGUE section 8, Table B |
 | `0815` = set `MEMORY_PLAY` position | V | RE_CATALOGUE section 8, Table A |
-| Whether the player re-reads `LIST_SONG_0` mid-playback | **U** | - |
+| The player RE-READS `LIST_SONG_0` mid-playback | **L** | probe 2026-09-05: appended row played |
+| `LIST_SONG_3` also exists; `_1`/`_2` do not; purpose unknown | **L** | probe `sqlite_master` dump |
+| The player leaves `LIST_ID` and `POS_ID` NULL | **L** | probe: NULL in every player-written row |
+| `MEMORY_PLAY.POSITION` is never updated during playback | **L** | read 0 in every sample, mid-track |
 | Whether `0112`/`0115`/`0117` touch the ACTIVE list or only saved playlists | **U** | - |
 | Whether any of those tags exist on **V2.28** | **U** | - |
 
@@ -271,13 +281,35 @@ Rules:
 discard what is already playing. Since the rows are already in `LIST_SONG_0`, adoption is
 just flipping the scope marker - no data movement at all.
 
-### Ordering
+### Ordering - keep IDs CONTIGUOUS, shift the tail
 
-P1 decides whether play order follows `ID` or `POS_ID`. If it is `ID`, inserting between two
-rows needs either a renumber (expensive, and racy under the playhead) or a gapped sequence.
-**Allocate `ID`/`POS_ID` in steps of 1000** on rebuild so an insert can usually take a
-midpoint with no renumber; renumber only when a gap is exhausted, and only ahead of the
-playhead.
+P1 settled `POS_ID`: the player leaves it NULL, so play order is `ID`, which it writes
+contiguous 1..N. The earlier idea of allocating IDs in steps of 1000 so inserts can take a
+midpoint is **dropped**, because it rests on an assumption the probe could not confirm.
+
+One thing is still unknown and probably always will be without a disassembly: whether the
+player addresses a row by its **ID value** or by its **ordinal position** in the table. Every
+observation so far had contiguous IDs, where the two are identical, so nothing distinguishes
+them - including the appended row.
+
+So do not build on the distinction. **Mirror exactly what the player produces: IDs contiguous
+from 1, `LIST_ID` and `POS_ID` NULL.** An insert becomes:
+
+1. shift every row AFTER the insertion point up by one (`UPDATE ... SET ID = ID + 1`,
+   descending so the unique index never collides),
+2. insert the new row at the freed ID,
+
+all inside one transaction. Both readings of the player's addressing stay correct, because
+both the ID values and the ordinals come out the same.
+
+**Never renumber at or before the playhead.** `MEMORY_PLAY.MUSIC_ID` holds the currently
+playing row and resume depends on it; leaving the current row and everything before it
+untouched keeps that pointer valid without having to rewrite it. Appending is the trivial
+case - nothing shifts at all.
+
+Cost: a queue is tens of rows, not thousands (5 rows for a 5-track album against 4821 in
+`SONG`), so a tail shift is a handful of indexed updates in one transaction. Cheaper than the
+rebuild it replaces by orders of magnitude.
 
 ### Persistence
 
@@ -363,11 +395,20 @@ Not part of the queue, recorded so they are not lost:
 
 ## 11. Decision
 
-1. Run **P1** and **P2**. They are cheap and P2 alone probably decides the design.
-2. If P2 passes -> build **Route B** as specced in section 6.
-3. If P2 fails -> run **P3**; take **Route C** if the tags are live on V2.28.
-4. If both fail -> ship **Route A** and accept that additions land at the next track
-   boundary rather than instantly.
+~~1. Run P1 and P2.~~ **DONE 2026-09-05. Both passed.**
+~~2. If P2 passes -> build Route B.~~ **This is now the plan.**
 
-Do not write a line of queue code before P1 and P2 have run. The design branches on them,
-and building against the wrong branch means throwing the work away.
+P3 (the `0112`/`0115`/`0117` list-mutation tags) is no longer on the critical path. Route B
+needs no IPC tag at all, so those stay unexplored rather than becoming a dependency - worth
+revisiting only if writing the table turns out to have a problem we cannot see yet.
+
+Remaining order of work:
+
+1. The write layer: append / insert-after / remove / clear against `LIST_SONG_0`, mirroring
+   the player's row shape, with the tail-shift ordering above. Testable on the host against a
+   fixture `song.db` - no device needed.
+2. Scope ownership (`Q:` sentinel) so a Library tap cannot silently wipe a user-built queue.
+3. UI: long-press -> Play next / Add to queue; the existing Queue screen gains remove and
+   reorder.
+4. Device pass: add while playing (the current track must not glitch), reorder ahead of the
+   playhead, reboot and confirm resume still lands on the right track.

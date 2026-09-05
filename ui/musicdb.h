@@ -92,6 +92,24 @@ int  mdb_import_m3u_sd(const char *root);
 /* Split a raw ARTIST string into individual names (comma / ; / "feat."). */
 int  mdb_split_artists(const char *raw, char toks[][MDB_STR], int cap);
 
+/* ---- the player's live play queue (LIST_SONG_0) --------------------------
+ * mq_player keeps its active queue in LIST_SONG_0 and RE-READS it as it advances -
+ * device-verified 2026-09-05, see docs/QUEUE_DESIGN.md. So a row written here is
+ * played, with no rebuild and no IPC command. That is what makes add-to-queue
+ * possible at all; everything below is a plain SQL edit of that table.
+ *
+ * Row shape MIRRORS what the player writes: IDs contiguous from 1 (play order),
+ * LIST_ID and POS_ID left NULL. Never renumber at or before the playing row -
+ * MEMORY_PLAY.MUSIC_ID points at it and resume depends on that staying valid.
+ *
+ * All return 1 on success, 0 on failure. */
+int  mdb_queue_count(void);                 /* rows currently in the queue */
+int  mdb_queue_playing_id(void);            /* LIST_SONG_0.ID of the playing row, 0 if unknown */
+int  mdb_queue_append(const char *path);    /* add to the end */
+int  mdb_queue_insert_after(int after_id, const char *path);  /* "play next" when given the playing row */
+int  mdb_queue_remove(int id);              /* drop one row, closing the gap */
+int  mdb_queue_clear_after(int id);         /* drop everything past `id` (keeps what is playing) */
+
 /* persistent per-song accent cache (0xRRGGBB; 0 = not computed). Survives reboot. */
 int  mdb_song_accent(const char *path);
 void mdb_set_song_accent(const char *path, int rgb);

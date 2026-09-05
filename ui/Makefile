@@ -47,6 +47,12 @@ fontcheck: $(APP)/tests/fontcheck.c $(APP)/theme.c $(APP)/config.c
 	    -o $@ $(APP)/tests/fontcheck.c $(APP)/theme.c $(APP)/config.c $(APP)/fileutil.c \
 	    $(shell find $(LVGL)/src -name '*.c') -lm -lrt -pthread
 
+# Queue write-layer test: exercises the LIST_SONG_0 mutations against a fixture DB.
+# musicdb.c hardcodes DB_PATH, so this writes to /usr/data/fiio/db/song.db - it needs
+# that path to exist and be WRITABLE (the directory too, for SQLite's journal).
+queuecheck: $(APP)/tests/queuecheck.c $(APP)/musicdb.c $(APP)/txtfold.c
+	gcc -O0 -std=gnu11 -D_GNU_SOURCE -I$(APP) -w -fsanitize=address,undefined 	    -o $@ $(APP)/tests/queuecheck.c $(APP)/musicdb.c $(APP)/txtfold.c $(APP)/sqlite3.c 	    -lpthread -ldl -lm
+
 clean:
 	rm -f $(OBJS) $(OBJS:.o=.d) mq_ui ipodos-ui fontcheck
 -include $(OBJS:.o=.d)

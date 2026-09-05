@@ -710,6 +710,133 @@ int mdb_unfavorite(int id){
 #define PL_COLS "PLAYLIST_ID,PATH,NAME,TITLE,ALBUM,ARTIST,GENRE,DISC,TRACK,IS_CUE,IS_ISO,IS_DSD,OFFSET,DURATION,NAME_CODE,TITLE_CODE,ALBUM_CODE,ARTIST_CODE,GENRE_CODE,ADD_TIME,SAMPLE_RATE,BIT_PER_SAMPLE,CHANNELS,BIT_RATE,SONG_MIMETYPE,SONG_PRODUCTION_YEAR,IS_SELECT,ALBUM_ARTIST,ALBUM_ARTIST_CODE"
 #define PL_SRC  "PATH,NAME,TITLE,ALBUM,ARTIST,GENRE,DISC,TRACK,IS_CUE,IS_ISO,IS_DSD,OFFSET,DURATION,NAME_CODE,TITLE_CODE,ALBUM_CODE,ARTIST_CODE,GENRE_CODE,ADD_TIME,SAMPLE_RATE,BIT_PER_SAMPLE,CHANNELS,BIT_RATE,SONG_MIMETYPE,SONG_PRODUCTION_YEAR,IS_SELECT,ALBUM_ARTIST,ALBUM_ARTIST_CODE"
 
+/* ---- LIST_SONG_0: the player's live play queue ---------------------------
+ * Verified on V2.28 hardware (docs/QUEUE_DESIGN.md): the player re-reads this table
+ * while playing, so rows written here are picked up mid-queue. Every function below
+ * is a transaction over that table and sends NO IPC command.
+ *
+ * The column list is the player's own, minus the two it leaves NULL. Note the V2.28
+ * additions (IS_M3U, M3U_PATH) that the V2.09 catalogue does not mention; SONG has no
+ * counterpart for them, so they take their defaults rather than being invented here. */
+#define Q_COLS "PATH,NAME,TITLE,ALBUM,ARTIST,GENRE,DISC,TRACK,IS_CUE,IS_ISO,OFFSET,DURATION,ADD_TIME,IS_SELECT,ALBUM_ARTIST"
+
+int mdb_queue_count(void){
+    sqlite3 *d = db(); if(!d) return 0;
+    sqlite3_stmt *st; int n = 0;
+    if(sqlite3_prepare_v2(d, "SELECT COUNT(*) FROM LIST_SONG_0;", -1, &st, NULL) == SQLITE_OK){
+        if(sqlite3_step(st) == SQLITE_ROW) n = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+    }
+    return n;
+}
+
+/* The row the player is on. MEMORY_PLAY.MUSIC_ID indexes LIST_SONG_0.ID (probe
+ * 2026-09-05: a 5-row queue, MUSIC_ID 2 then 5, matching rows 2 and 5). Returns 0
+ * when there is no resume row or it points outside the queue - callers must treat
+ * that as "no safe insertion point" rather than guessing position 1. */
+int mdb_queue_playing_id(void){
+    sqlite3 *d = db(); if(!d) return 0;
+    sqlite3_stmt *st; int id = 0;
+    if(sqlite3_prepare_v2(d, "SELECT l.ID FROM MEMORY_PLAY m JOIN LIST_SONG_0 l ON l.ID=m.MUSIC_ID LIMIT 1;",
+                          -1, &st, NULL) == SQLITE_OK){
+        if(sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+    }
+    return id;
+}
+
+/* Copy one SONG row into the queue at `id`. Caller has already made room. */
+static int q_insert_at(sqlite3 *d, int id, const char *path){
+    sqlite3_stmt *st;
+    const char *sql = "INSERT INTO LIST_SONG_0 (ID,LIST_ID,POS_ID," Q_COLS ") "
+                      "SELECT ?,NULL,NULL," Q_COLS " FROM SONG WHERE PATH=? LIMIT 1;";
+    if(sqlite3_prepare_v2(d, sql, -1, &st, NULL) != SQLITE_OK) return 0;
+    sqlite3_bind_int (st, 1, id);
+    sqlite3_bind_text(st, 2, path, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    /* a step that succeeds but changes nothing means the PATH is not in SONG */
+    return (rc == SQLITE_DONE && sqlite3_changes(d) > 0);
+}
+
+int mdb_queue_append(const char *path){
+    if(!path || !path[0]) return 0;
+    sqlite3 *d = db(); if(!d) return 0;
+    int last = 0;
+    sqlite3_stmt *st;
+    if(sqlite3_prepare_v2(d, "SELECT IFNULL(MAX(ID),0) FROM LIST_SONG_0;", -1, &st, NULL) == SQLITE_OK){
+        if(sqlite3_step(st) == SQLITE_ROW) last = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+    }
+    return q_insert_at(d, last + 1, path);   /* nothing shifts: the trivial case */
+}
+
+int mdb_queue_insert_after(int after_id, const char *path){
+    if(after_id < 1 || !path || !path[0]) return 0;
+    sqlite3 *d = db(); if(!d) return 0;
+    if(sqlite3_exec(d, "BEGIN IMMEDIATE;", 0, 0, 0) != SQLITE_OK) return 0;
+    /* Shift the tail down by one, VIA NEGATIVE IDS. Doing it in one pass risks row N
+     * colliding with N+1 before N+1 has moved, and ID is the primary key so that
+     * aborts. The obvious guard - UPDATE ... ORDER BY ID DESC - is NOT AVAILABLE:
+     * it needs SQLITE_ENABLE_UPDATE_DELETE_LIMIT, which this build does not set
+     * (verified: prepare fails with `near "ORDER": syntax error`). Negating instead
+     * is collision-free by construction, because no positive row can equal a
+     * negative one and -(ID+1) stays distinct across distinct IDs. rowids may be
+     * negative in SQLite, so the intermediate state is legal. */
+    sqlite3_stmt *st;
+    int ok = 0;
+    if(sqlite3_prepare_v2(d, "UPDATE LIST_SONG_0 SET ID = -(ID + 1) WHERE ID > ?;",
+                          -1, &st, NULL) == SQLITE_OK){
+        sqlite3_bind_int(st, 1, after_id);
+        ok = (sqlite3_step(st) == SQLITE_DONE);
+        sqlite3_finalize(st);
+    }
+    if(ok) ok = (sqlite3_exec(d, "UPDATE LIST_SONG_0 SET ID = -ID WHERE ID < 0;", 0, 0, 0) == SQLITE_OK);
+    if(ok) ok = q_insert_at(d, after_id + 1, path);
+    sqlite3_exec(d, ok ? "COMMIT;" : "ROLLBACK;", 0, 0, 0);
+    return ok;
+}
+
+int mdb_queue_remove(int id){
+    if(id < 1) return 0;
+    sqlite3 *d = db(); if(!d) return 0;
+    if(sqlite3_exec(d, "BEGIN IMMEDIATE;", 0, 0, 0) != SQLITE_OK) return 0;
+    sqlite3_stmt *st;
+    int ok = 0;
+    if(sqlite3_prepare_v2(d, "DELETE FROM LIST_SONG_0 WHERE ID=?;", -1, &st, NULL) == SQLITE_OK){
+        sqlite3_bind_int(st, 1, id);
+        ok = (sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(d) > 0);
+        sqlite3_finalize(st);
+    }
+    /* Close the gap so IDs stay contiguous. Same two-pass negation as the insert,
+     * for the same reason: no ORDER BY on UPDATE in this build, and a single pass
+     * could collide. Here the first row to move lands on the freed slot, so a
+     * straight pass would probably work - "probably" is not a guarantee worth
+     * shipping when the alternative is one extra statement. */
+    if(ok && sqlite3_prepare_v2(d, "UPDATE LIST_SONG_0 SET ID = -(ID - 1) WHERE ID > ?;",
+                                -1, &st, NULL) == SQLITE_OK){
+        sqlite3_bind_int(st, 1, id);
+        ok = (sqlite3_step(st) == SQLITE_DONE);
+        sqlite3_finalize(st);
+    }
+    if(ok) ok = (sqlite3_exec(d, "UPDATE LIST_SONG_0 SET ID = -ID WHERE ID < 0;", 0, 0, 0) == SQLITE_OK);
+    sqlite3_exec(d, ok ? "COMMIT;" : "ROLLBACK;", 0, 0, 0);
+    return ok;
+}
+
+int mdb_queue_clear_after(int id){
+    if(id < 1) return 0;
+    sqlite3 *d = db(); if(!d) return 0;
+    sqlite3_stmt *st;
+    int ok = 0;
+    if(sqlite3_prepare_v2(d, "DELETE FROM LIST_SONG_0 WHERE ID > ?;", -1, &st, NULL) == SQLITE_OK){
+        sqlite3_bind_int(st, 1, id);
+        ok = (sqlite3_step(st) == SQLITE_DONE);
+        sqlite3_finalize(st);
+    }
+    return ok;   /* no renumber needed: we only ever removed a suffix */
+}
+
 /* Create a new playlist; returns its id (>0) or 0 on failure. */
 long mdb_playlist_create(const char *name){
     sqlite3 *d = db(); if(!d) return 0;
