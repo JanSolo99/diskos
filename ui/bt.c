@@ -2,6 +2,7 @@
 /* Copyright (C) 2026 diskOS contributors */
 #include "screens.h"
 #include "config.h"       /* cfg_get_int/cfg_set_int: persist the BT on/off intent */
+#include "txtfold.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -498,7 +499,12 @@ static void add_dev_row(const char *mac, const char *name, int connected){
         tx = 34;
     }
     lv_obj_t *t = lv_label_create(r);
-    lv_label_set_text(t, name);
+    /* The peer chooses this name; phones and headphones ship with accented and
+     * emoji defaults. Fold a COPY - the original is matched against bluetoothctl
+     * output elsewhere and must stay byte-exact. */
+    char shown[128]; snprintf(shown, sizeof shown, "%s", name);
+    txt_fold_ascii(shown);
+    lv_label_set_text(t, shown);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(t, tx, 13); lv_obj_set_size(t, 232 - tx, 20);
     lv_obj_set_style_text_font(t, th_font(16), 0);

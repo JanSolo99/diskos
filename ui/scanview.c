@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "screens.h"
+#include "txtfold.h"
 #include "scanner.h"
 #include <stdio.h>
 #include <string.h>
@@ -67,7 +68,12 @@ static void tick_cb(lv_timer_t *t)
     lv_label_set_text(g_phase, "Scanning music");
     snprintf(b, sizeof b, "%d of %d", done, expect);
     lv_label_set_text(g_count, b);
-    lv_label_set_text(g_file, name);
+    /* A filename straight off the SD card - the one label here that shows raw
+     * user data during a scan. Folded so a non-ASCII name is readable rather
+     * than a row of boxes. */
+    char shown[96]; snprintf(shown, sizeof shown, "%s", name);
+    txt_fold_ascii(shown);
+    lv_label_set_text(g_file, shown);
 }
 
 void scanview_create(lv_obj_t *root)

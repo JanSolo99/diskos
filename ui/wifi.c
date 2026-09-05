@@ -3,6 +3,7 @@
 #include "screens.h"
 #include <dirent.h>   /* /proc scan: pidof without a fork (see proc_running) */
 #include "config.h"
+#include "txtfold.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -486,7 +487,12 @@ static void add_net_row(const char *ssid, int signal, int secured, int connected
         tx = 34;
     }
     lv_obj_t *t = lv_label_create(r);
-    lv_label_set_text(t, ssid);
+    /* An SSID is arbitrary bytes chosen by whoever set up the router - accents and
+     * emoji are common. Fold a COPY: the original is the key we match on and send
+     * to wpa_supplicant, and must keep its exact bytes. */
+    char shown[128]; snprintf(shown, sizeof shown, "%s", ssid);
+    txt_fold_ascii(shown);
+    lv_label_set_text(t, shown);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(t, tx, 13); lv_obj_set_size(t, 202 - tx, 20);
     lv_obj_set_style_text_font(t, th_font(16), 0);

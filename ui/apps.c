@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <dirent.h>
+#include "txtfold.h"
 
 /* The Home MENU (swipe left from Home) - the "proper accessible home screen menu
  * rather than putting everything in the settings page" the beta review asked for.
@@ -56,6 +57,7 @@ static void scan_apps(void){
             }
             fclose(f);
         }
+        txt_fold_ascii(a->name);   /* app.conf is user-authored; exec stays byte-exact */
         g_napps++;
     }
     closedir(d);

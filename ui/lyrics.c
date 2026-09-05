@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "screens.h"
+#include "txtfold.h"
 #include "ipc.h"
 #include "musicdb.h"
 #include <stdio.h>
@@ -270,7 +271,11 @@ void lyrics_poll(lv_timer_t *t)
     if(done == g_req){
         /* result is for the current track; g_lbuf is visible (published under the lock)
          * and no worker is running, so reading it here is race-free. */
-        lv_label_set_text(g_text, g_lbuf);
+        /* Lyrics arrive from lrclib.net or a .lrc on the card, so they carry
+          * typographic quotes and accents as a matter of course - exactly the
+          * range with no glyph. Folded in place; g_lbuf is display-only. */
+         txt_fold_ascii(g_lbuf);
+         lv_label_set_text(g_text, g_lbuf);
         lv_obj_scroll_to_y(g_scroll, 0, LV_ANIM_OFF);
     } else if(g_q_title[0]){
         /* finished fetch was for a superseded track - fetch the current one
