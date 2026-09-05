@@ -270,7 +270,12 @@ PLAYLIST_INFO(ID) ON DELETE CASCADE`, `UNIQUE(PLAYLIST_ID,PATH,TRACK)`.
 
 **LIVE V2.28 DELTA (device-dumped 2026-09-05 via `tools/diskos-probe.sh`, supersedes the
 V2.09 reading above wherever they disagree):**
-- **Only `LIST_SONG_0` exists.** `LIST_SONG_1` and `LIST_SONG_2` are absent - `no such table`.
+- **`LIST_SONG_0` and `LIST_SONG_3` exist; `LIST_SONG_1` and `LIST_SONG_2` do not.** The full
+  V2.28 table list, dumped from `sqlite_master`: `CUSTOM_PLAYLIST`, `CUSTOM_PLAYLIST_INDEX`,
+  `LIST_SONG_0`, `LIST_SONG_3`, `MEMORY_PLAY`, `MY_LOVE`, `PEQ`, `PLAY_LIST`, `PLAY_STATS`
+  (ours), `RECORD_SONG`, `SONG`. `LIST_SONG_3`, `CUSTOM_PLAYLIST_INDEX` and `RECORD_SONG` are
+  undocumented - what selects list 3 over list 0 is UNKNOWN and worth pinning before anything
+  writes to either.
 - **Two extra trailing columns:** `... ALBUM_ARTIST TEXT, IS_M3U INT, M3U_PATH TEXT`.
 - **`LIST_ID` and `POS_ID` are both NULL** in every row the player builds. So `POS_ID` is
   NOT the `MEMORY_PLAY.MUSIC_ID` join key on this firmware, and anything written here should
@@ -279,8 +284,17 @@ V2.09 reading above wherever they disagree):**
   `MEMORY_PLAY.TRACK=2`, and `ID=2` is the album's track 2. ID is 1-based and contiguous,
   which is also what `ui_play_list`'s `pos1-1` position jump indexes.
 - **`PLAY_LIST` is EMPTY** - it is not the queue registry on V2.28, whatever it was on V2.09.
-- **`MEMORY_PLAY` has more columns than the 7 documented** (a live row printed 8 values plus a
-  trailing empty field). Re-dump `.schema MEMORY_PLAY` before relying on field order.
+- **`MEMORY_PLAY` V2.28 schema, dumped live** - two columns more than the V2.09 note:
+  `ID INTEGER PRIMARY KEY autoincrement, MUSIC_ID INT, IS_PLAYING INT, POSITION INT,
+  IS_CUE INT, IS_ISO INT, TRACK INT, IS_NAS INT, IS_M3U INT`.
+- **`MEMORY_PLAY.POSITION` is NOT updated during playback** - it read 0 in every sample across
+  four probe runs, including while a track was mid-play. `MUSIC_ID` *did* move (2 -> 5) when the
+  user skipped, so the row is written on a track CHANGE but not continuously. Anything that
+  polls this table for live position will read zero for ever.
+- **The player leaves `POS_ID` NULL; a row we insert with `POS_ID = SONG.ID` is accepted and
+  sits alongside them.** Verified by appending one (`ID=6, POS_ID=1932`). For fidelity, code
+  that writes this table should mirror the player and leave `LIST_ID`/`POS_ID` NULL rather
+  than inventing values whose meaning we do not know.
 - The table tracks the CURRENT scope and nothing more: 5 rows for a 5-track album against
   4821 rows in `SONG`. It is the live queue, not a full-library snapshot.
 - STILL UNKNOWN: whether the player re-reads this table during playback or caches it at build

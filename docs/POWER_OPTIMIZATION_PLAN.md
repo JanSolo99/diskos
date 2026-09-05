@@ -16,6 +16,31 @@ The most important caveat is that the kernel tick behavior is unknown. If Linux 
 second regardless of application behavior. Reducing application loop frequency alone would then
 buy little; reducing work per wake becomes the primary lever. Phase 0 probes this first.
 
+## 1b. MEASURED ON HARDWARE 2026-09-05 (supersedes the ranking below where they disagree)
+
+Four `tools/diskos-probe.sh` runs on the V2.28 device settle the biggest open question and
+demote finding #1.
+
+- **The kernel is TICKLESS.** `/proc/timer_list` reports `.nohz_mode : 2` (NOHZ_MODE_HIGHRES)
+  on both CPUs - and it is a DUAL-core SMP part, which this plan did not account for. So the
+  tick is not unconditionally firing at HZ, and reducing wakeups is not futile. `HZ=100`
+  (tick_sched_timer expires on round 10ms boundaries).
+- **But `mq_ui` is not the problem.** Idle, it burns **4-6 jiffies per 1000** - about **0.5% of
+  one core**. Under active use it hits 19-42%. The 30ms loop floor is real and costs almost
+  nothing; rewriting it buys back half a percent.
+- **What actually wakes the cores is audio.** With `mq_ui` at 0.5%, `core_timerevent` still
+  fires **~490/s** and `jz-mailbox` (inter-core) climbs to **320/s** during playback. That is
+  the player refilling buffers, not us. `mmc0` runs 15-25/s reading the card.
+
+**Verdict: finding #1 is DEPRIOTISED.** It is accurately described but worth ~0.5% of one
+core. Anything spent on the UI loop is spent in the wrong place; the wake budget belongs to
+the audio path and the radios, which this plan already ranks #2 and #3. Finding #3 (the BT
+`popen` on the LVGL timer) was confirmed and is FIXED in commit 2db5f3c.
+
+IRQ names, for the next person reading a delta: 2 `xburst2-intc`, 3 `jz-mailbox`,
+4 `core_timerevent`, 15 `13440000.sfc`, 44 `mmc0`, 56 `mmc1`, 72 `power_up_key_irq` (the
+physical power button), 76 `cst816t` (touch), 78 `bcmsdh_sdmmc` (Wi-Fi SDIO).
+
 ## 2. Findings Ranked By Expected Impact
 
 | Rank | Finding | Evidence | Cost class |
