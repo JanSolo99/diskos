@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 
 /* Bluetooth settings (SCR_BT) + a details screen (SCR_BT_INFO).
@@ -192,12 +193,25 @@ static int bt_mac_valid(const char *mac){
     return mac[17] == 0;
 }
 
-/* Route once per connected bluealsa A2DP sink. Keeping the MAC latched while the
- * PCM exists preserves a manual switch back to analog until the sink reconnects. */
-static void bt_autoroute_poll_cb(lv_timer_t *t){
-    (void)t;
-    char path[256], mac[20];
-    int found = 0;
+/* ---- A2DP sink discovery, OFF the LVGL thread ------------------------------
+ * Finding the connected sink means asking bluealsa, and that is a popen: a fork,
+ * an exec and a pipe read. This used to run directly in the 3-second LVGL timer
+ * below - roughly twenty forks a minute on the UI thread, screen-off included -
+ * which is precisely the hazard this file's own header warns about and which the
+ * status poll already solved for its `hcitool` check (see btconn_worker in
+ * main.c): do the blocking part on a detached thread and publish plain data.
+ *
+ * The worker writes the MAC it found (or "" for none) under g_ar_mu; the timer
+ * only reads that and decides whether to route. g_ar_busy keeps exactly one
+ * probe in flight, so a bluealsa-cli that wedges cannot pile up threads - it
+ * simply suspends auto-routing until it exits, rather than freezing the UI. */
+static pthread_mutex_t g_ar_mu = PTHREAD_MUTEX_INITIALIZER;
+static char        g_ar_mac[20];     /* last sink seen; "" = none. Guarded by g_ar_mu. */
+static _Atomic int g_ar_busy;        /* 1 while a probe thread is running */
+
+static void *bt_autoroute_worker(void *arg){
+    (void)arg;
+    char path[256], mac[20] = "";
     FILE *p = popen("bluealsa-cli list-pcms 2>/dev/null | grep -m1 a2dpsrc", "r");
     if(p){
         if(fgets(path, sizeof path, p)){
@@ -206,15 +220,47 @@ static void bt_autoroute_poll_cb(lv_timer_t *t){
                 dev += 4;
                 char *slash = strchr(dev, '/');
                 if(slash && slash - dev == 17){
-                    memcpy(mac, dev, 17); mac[17] = 0;
-                    for(int i = 0; i < 17; i++) if(mac[i] == '_') mac[i] = ':';
-                    found = bt_mac_valid(mac);
+                    char cand[20];
+                    memcpy(cand, dev, 17); cand[17] = 0;
+                    for(int i = 0; i < 17; i++) if(cand[i] == '_') cand[i] = ':';
+                    if(bt_mac_valid(cand)) snprintf(mac, sizeof mac, "%s", cand);
                 }
             }
         }
         pclose(p);
     }
-    if(!found){ g_bt_autorouted[0] = 0; return; }
+    pthread_mutex_lock(&g_ar_mu);
+    snprintf(g_ar_mac, sizeof g_ar_mac, "%s", mac);
+    pthread_mutex_unlock(&g_ar_mu);
+    atomic_store(&g_ar_busy, 0);
+    return NULL;
+}
+
+/* Route once per connected bluealsa A2DP sink. Keeping the MAC latched while the
+ * PCM exists preserves a manual switch back to analog until the sink reconnects.
+ * Acts on the PREVIOUS probe's result and kicks the next one, so this callback
+ * never blocks: one poll of added latency, against a fork per tick on the UI
+ * thread. ui_route_bt stays here on the LVGL thread - it is the routing command,
+ * not the discovery, and it must keep its existing ordering guarantees. */
+static void bt_autoroute_poll_cb(lv_timer_t *t){
+    (void)t;
+    char mac[20];
+    pthread_mutex_lock(&g_ar_mu);
+    snprintf(mac, sizeof mac, "%s", g_ar_mac);
+    pthread_mutex_unlock(&g_ar_mu);
+
+    int expected = 0;                                  /* kick the next probe, one at a time */
+    if(atomic_compare_exchange_strong(&g_ar_busy, &expected, 1)){
+        pthread_t th;
+        pthread_attr_t at;
+        pthread_attr_init(&at);
+        pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+        pthread_attr_setstacksize(&at, 64*1024);
+        if(pthread_create(&th, &at, bt_autoroute_worker, NULL) != 0) atomic_store(&g_ar_busy, 0);
+        pthread_attr_destroy(&at);
+    }
+
+    if(!mac[0]){ g_bt_autorouted[0] = 0; return; }
     if(strcmp(mac, g_bt_autorouted)){
         if(ui_route_bt(mac) == 0)     /* latch only on a successful route, else retry on the next poll */
             snprintf(g_bt_autorouted, sizeof g_bt_autorouted, "%s", mac);
@@ -227,6 +273,13 @@ static void bt_autoroute_start(void){
 }
 static void bt_autoroute_stop(void){
     if(g_bt_autoroute_timer){ lv_timer_del(g_bt_autoroute_timer); g_bt_autoroute_timer = NULL; }
+    /* drop the last probe result too: re-enabling BT must not act on a sink seen
+     * before it was turned off, ahead of the first fresh probe. (An in-flight
+     * worker may still publish after this; it is then overwritten by the next
+     * probe, and routing only happens on a timer tick that this stop has cancelled.) */
+    pthread_mutex_lock(&g_ar_mu);
+    g_ar_mac[0] = 0;
+    pthread_mutex_unlock(&g_ar_mu);
     g_bt_autorouted[0] = 0;
 }
 
