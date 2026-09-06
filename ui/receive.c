@@ -39,7 +39,13 @@
  * under a name the scanner would index or the player would try to open, and an
  * interrupted upload leaves one hidden file rather than a corrupt track. */
 
-#define RX_PORT        8081          /* lastfm's setup server owns 8080 */
+/* Port 80 so the URL has no ":port" to read off a round screen and type. We are root,
+ * so binding it is allowed; nothing on the stock firmware listens there (checked on
+ * device: 22, 53, 111, 12100, 12103, 47220, 50411, 50902). Falls back to 8081 if the
+ * bind is ever refused, so a future firmware taking port 80 degrades instead of
+ * breaking. lastfm's setup server owns 8080, hence not that. */
+#define RX_PORT        80
+#define RX_PORT_ALT    8081
 #define RX_MUSIC_DIR   "/tmp/sdcard/Music"
 #define RX_INBOX       "Received"    /* subfolder, so it is obvious what arrived this way */
 #define RX_CHUNK       (32*1024)
@@ -97,9 +103,13 @@ static int wlan_ip(char *out, int cap){
 /* Unguessable path token. /dev/urandom or nothing: a predictable token would make the
  * "only while the screen is open" guarantee the ONLY thing standing between the card
  * and anyone on the network, and that is too much weight for one guarantee to carry. */
+/* 6 characters, not 12. The whole URL has to be readable off a 360px circle and typed
+ * by hand, and 6 chars of a 32-symbol alphabet is still 2^30 - about a billion - which
+ * is not brute-forceable over HTTP on a LAN in the few minutes this server is even
+ * listening. The alphabet already omits l/o/0/1 so nothing is ambiguous when read aloud. */
 static int gen_token(char *out, int cap){
     static const char AL[] = "abcdefghijkmnpqrstuvwxyz23456789";
-    unsigned char r[12];
+    unsigned char r[6];
     int f = open("/dev/urandom", O_RDONLY); if(f<0) return -1;
     ssize_t n = read(f, r, sizeof r); close(f);
     if(n != (ssize_t)sizeof r) return -1;
@@ -393,13 +403,24 @@ int receive_start(void){
     int fd = socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1;
     int one=1; setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&one,sizeof one);
     struct sockaddr_in a; memset(&a,0,sizeof a);
-    a.sin_family = AF_INET; a.sin_port = htons(RX_PORT);
+    a.sin_family = AF_INET;
     a.sin_addr.s_addr = inet_addr(ip);       /* wlan0 only - never INADDR_ANY */
     if(a.sin_addr.s_addr == INADDR_NONE){ close(fd); return -1; }
-    if(bind(fd,(struct sockaddr*)&a,sizeof a)!=0 || listen(fd,4)!=0){ close(fd); return -1; }
+
+    int port = RX_PORT;
+    a.sin_port = htons(port);
+    if(bind(fd,(struct sockaddr*)&a,sizeof a) != 0){
+        port = RX_PORT_ALT;                  /* 80 refused -> fall back rather than fail */
+        a.sin_port = htons(port);
+        if(bind(fd,(struct sockaddr*)&a,sizeof a) != 0){ close(fd); return -1; }
+    }
+    if(listen(fd,4)!=0){ close(fd); return -1; }
     fcntl(fd,F_SETFL,O_NONBLOCK);
 
-    snprintf(g_url,sizeof g_url,"http://%s:%d/%s/",ip,RX_PORT,g_token);
+    /* Port omitted from the printed URL when it is 80 - browsers assume it, and those
+     * three characters matter on a screen this size. */
+    if(port == 80) snprintf(g_url,sizeof g_url,"http://%s/%s/",ip,g_token);
+    else           snprintf(g_url,sizeof g_url,"http://%s:%d/%s/",ip,port,g_token);
     g_fd = fd;
     atomic_store(&g_run,1);
     atomic_store(&g_done,0); atomic_store(&g_busy,0); atomic_store(&g_bytes,0);

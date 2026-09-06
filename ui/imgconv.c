@@ -90,7 +90,39 @@ static int write_bmp24(const char *path, const unsigned char *rgba, unsigned w, 
  * decode it, and 32 MB is already far past any cover or wallpaper worth having. */
 #define IMG_MAX_FILE_BYTES (32u*1024u*1024u)
 
+/* DISABLED - this crashed a real device on 2026-09-06 and the fix is not a one-liner.
+ *
+ * LVGL does not vendor stock lodepng. It PATCHES decodeGeneric(), the core path behind
+ * lodepng_decode32(), to allocate through LVGL instead of malloc:
+ *
+ *     lv_draw_buf_t *decoded = lv_draw_buf_create_ex(image_cache_draw_buf_handlers,
+ *                                                    *w, *h, LV_COLOR_FORMAT_ARGB8888, ...);
+ *     *out = (unsigned char *)decoded;
+ *
+ * So `out` is an lv_draw_buf_t STRUCT POINTER, not a pixel array. This function then
+ * walked it as w*h*4 bytes of RGBA (reading far past the struct) and released it with
+ * lv_free() (the wrong deallocator). That is heap corruption on a 128 MB device, which
+ * is how it ended as a dead mq_player and an MCU reboot rather than a tidy segfault.
+ *
+ * Three things are wrong at once, which is why this is a stub and not a patch:
+ *   - the pixels live at ((lv_draw_buf_t *)out)->data, not at out
+ *   - it must be released with lv_draw_buf_destroy(), not free()/lv_free()
+ *   - LV_COLOR_FORMAT_ARGB8888 is B,G,R,A in memory on little-endian, so even the
+ *     channel order below is wrong for it
+ * and on top of all three it reaches image_cache_draw_buf_handlers - LVGL global state -
+ * from an art worker thread.
+ *
+ * The right fix is to stop borrowing LVGL's copy: vendor stock lodepng as our own
+ * translation unit with plain malloc and LODEPNG_NO_COMPILE_DISK, so the decoder has no
+ * LVGL coupling and is safe off-thread. Until then this returns -1, which is exactly the
+ * behaviour before the bridge existed: PNG covers show no art, and nothing crashes.
+ * See docs/FEATURE_PLAN.md. */
 int img_png_to_bmp(const char *png, const char *bmp, unsigned max_pixels){
+    (void)png; (void)bmp; (void)max_pixels;
+    return -1;
+}
+
+int img_png_to_bmp_UNSAFE_disabled(const char *png, const char *bmp, unsigned max_pixels){
     if(!png || !bmp) return -1;
     if(!img_is_png(png)) return -1;
 
