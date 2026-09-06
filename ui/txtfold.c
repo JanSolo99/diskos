@@ -58,10 +58,29 @@ static const char *fold_cp(uint32_t cp)
         case 0xB4:   return "'";     /* acute accent used as an apostrophe */
         case 0x2018: case 0x2019:    /* ' ' - THE apostrophe bug */
         case 0x201A: case 0x201B:
-        case 0x2032:               return "'";
+        case 0x2032:
+        /* Apostrophe LOOKALIKES that are not punctuation at all. Seen on a real track
+         * 2026-09-06: "8. (SALTILLO)Cosmic(SALTILLO).m4a" - U+A78C, a Latin LETTER that
+         * merely looks like an apostrophe. Taggers and rippers substitute these on
+         * purpose because a real ' is awkward in a filename, so they turn up in exactly
+         * the titles a music player has to draw. */
+        case 0xA78B: case 0xA78C:  /* LATIN CAPITAL/SMALL LETTER SALTILLO */
+        case 0x02B9:               /* MODIFIER LETTER PRIME */
+        case 0x02BB: case 0x02BC:  /* MODIFIER LETTER TURNED COMMA / APOSTROPHE */
+        case 0x02BD: case 0x02BE:  /* MODIFIER LETTER REVERSED COMMA / RIGHT HALF RING */
+        case 0x02BF: case 0x02C8:  /* MODIFIER LETTER LEFT HALF RING / VERTICAL LINE */
+        case 0x055A:               /* ARMENIAN APOSTROPHE */
+        case 0x2035:               /* REVERSED PRIME */
+        case 0xFF07:               /* FULLWIDTH APOSTROPHE */
+                                   return "'";
         case 0x201C: case 0x201D:    /* " " */
         case 0x201E: case 0x201F:
-        case 0x2033:               return "\"";
+        case 0x2033:
+        case 0x02BA:               /* MODIFIER LETTER DOUBLE PRIME */
+        case 0x2036:               /* REVERSED DOUBLE PRIME */
+        case 0x3003:               /* DITTO MARK */
+        case 0xFF02:               /* FULLWIDTH QUOTATION MARK */
+                                   return "\"";
         case 0x2010: case 0x2011:    /* hyphens */
         case 0x2012: case 0x2013:    /* en dash */
         case 0x2014: case 0x2015:    /* em dash */

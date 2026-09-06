@@ -2,6 +2,7 @@
 /* Copyright (C) 2026 diskOS contributors */
 #include "imgconv.h"
 #include "lvgl/src/libs/lodepng/lodepng.h"
+#include "lvgl/src/stdlib/lv_mem.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,6 +86,10 @@ static int write_bmp24(const char *path, const unsigned char *rgba, unsigned w, 
     return 0;
 }
 
+/* A PNG bigger than this is refused outright. The whole file is read into memory to
+ * decode it, and 32 MB is already far past any cover or wallpaper worth having. */
+#define IMG_MAX_FILE_BYTES (32u*1024u*1024u)
+
 int img_png_to_bmp(const char *png, const char *bmp, unsigned max_pixels){
     if(!png || !bmp) return -1;
     if(!img_is_png(png)) return -1;
@@ -93,12 +98,35 @@ int img_png_to_bmp(const char *png, const char *bmp, unsigned max_pixels){
     if(png_size(png,&w,&h) != 0) return -1;
     if(max_pixels && (unsigned long)w*h > max_pixels) return -1;   /* refuse before allocating */
 
+    /* Read the file ourselves and use the MEMORY decoder, NOT lodepng_decode32_file().
+     * LVGL's build of lodepng does its file I/O through lv_fs_open/lv_fs_seek, so the
+     * _file variant only understands LVGL drive-letter paths ("A:/tmp/x.png") and fails
+     * on a plain POSIX one - silently, which is exactly how this shipped broken the
+     * first time. It would also mean touching LVGL's FS layer from a worker thread,
+     * which is not something to do casually. This way is thread-safe and has no LVGL
+     * runtime dependency at all. */
+    FILE *f = fopen(png,"rb"); if(!f) return -1;
+    if(fseek(f,0,SEEK_END) != 0){ fclose(f); return -1; }
+    long fsz = ftell(f);
+    if(fsz <= 0 || (unsigned long)fsz > IMG_MAX_FILE_BYTES){ fclose(f); return -1; }
+    rewind(f);
+    unsigned char *raw = malloc((size_t)fsz);
+    if(!raw){ fclose(f); return -1; }
+    size_t got = fread(raw,1,(size_t)fsz,f);
+    fclose(f);
+    if(got != (size_t)fsz){ free(raw); return -1; }
+
     unsigned char *rgba = NULL;
     unsigned dw=0, dh=0;
-    if(lodepng_decode32_file(&rgba,&dw,&dh,png) != 0 || !rgba) return -1;
+    unsigned err = lodepng_decode32(&rgba,&dw,&dh,raw,(size_t)fsz);
+    free(raw);
+    if(err != 0 || !rgba) return -1;
 
     int rc = write_bmp24(bmp,rgba,dw,dh);
-    free(rgba);                       /* lodepng allocates with malloc */
+    /* lv_free, not free: lodepng here allocates through lv_malloc. lv_conf.h currently
+     * maps that to libc via LV_STDLIB_CLIB so the two are the same today, but pairing
+     * them correctly means flipping that setting cannot turn this into heap corruption. */
+    lv_free(rgba);
     if(rc != 0) remove(bmp);
     return rc;
 }
