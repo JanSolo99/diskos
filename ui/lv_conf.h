@@ -777,7 +777,11 @@
  * m4a with a PNG cover showed no art. We are NOT relying on LVGL's PNG image decoder
  * here; nothing hands LVGL a .png source, because decoding at draw time is the
  * per-frame cost the whole art pipeline exists to avoid. */
-#define LV_USE_LODEPNG 1
+/* 0 again. We do NOT use LVGL's lodepng - it is patched to hand back lv_draw_buf_t
+ * from the LVGL image cache, which is unusable off the LVGL thread and crashed a device
+ * on 2026-09-06. ui/pngdec.c is our own de-LVGL-ised copy and owns these symbols;
+ * leaving this at 1 would be a duplicate-symbol clash at link. */
+#define LV_USE_LODEPNG 0
 
 /*PNG decoder(libpng) library*/
 #define LV_USE_LIBPNG 0
