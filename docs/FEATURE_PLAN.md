@@ -169,6 +169,29 @@ HTTPS + Funnel step for remote, which is config rather than new device code.
 
 ---
 
+## Requested: playing an album should switch to Sequential
+
+Asked for 2026-09-06. Starting an ALBUM and getting shuffle is never what was meant -
+an album is an ordered work, and the play mode is a global the user set for something
+else entirely.
+
+Not yet designed, and there are two real questions before writing any of it:
+
+- **Whose mode is it?** Play mode lives with the player (`0102`, and `a607` reports it
+  back through `ipc.c`). Setting it is an existing decode seam in `main.c`, so this is
+  not new IPC - but it IS us changing a setting the user chose, which needs to be
+  visible rather than silent.
+- **Does it stick?** If tapping an album forces Sequential, does the mode stay changed
+  after that album ends? Silently leaving the user in Sequential forever because they
+  once played an album would be worse than the problem. The likely right shape is a
+  setting - "Albums always play in order" - defaulted ON, applied when the play scope is
+  an album, and NOT applied when the scope is an artist, a genre or all-songs, where
+  shuffle is a legitimate thing to want.
+
+Applies to *Play all* on an album row and to tapping a track from inside an album view.
+Worth pinning what the player actually reports for the current mode before writing it,
+so the restore case is built on an observation rather than an assumption.
+
 ## Other things genuinely missing
 
 Ordered by value per unit of work, not by ambition.

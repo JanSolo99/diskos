@@ -18,6 +18,9 @@
 static lv_obj_t *g_root, *g_qr, *g_url, *g_stat, *g_hint;
 static lv_timer_t *g_tick;
 static int g_last_done = -1;
+/* screenmgr now calls receive_ui_leave() on EVERY transition away, so it has to know
+ * whether there is anything to tear down - otherwise it would re-toast on each one. */
+static int g_open;
 
 static void fmt_size(long b, char *out, int cap){
     /* tenths, done exactly: remainder*10/MB. The obvious /(1024*105) is not a tenth of
@@ -62,9 +65,16 @@ static void tick_cb(lv_timer_t *t){ (void)t; refresh(); }
 void receive_ui_enter(void)
 {
     if(!g_root) return;
+    /* Idempotent by design. Returning from the screensaver re-enters this screen, and
+     * restarting the server there would mint a NEW token - silently invalidating the
+     * page already open in the browser mid-upload. receive_start() is itself a no-op
+     * while live, so the URL and QR stay exactly as scanned. */
+    if(g_open){ refresh(); return; }
+    g_open = 1;
     g_last_done = -1;
 
     if(receive_start() != 0){
+        g_open = 0;                           /* never started, so leave() must not toast */
         lv_qrcode_update(g_qr, "", 0);
         lv_obj_add_flag(g_qr, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(g_url, "Wi-Fi is off");
@@ -87,6 +97,8 @@ void receive_ui_enter(void)
 /* Called by screenmgr on EXIT. Stops the server and drops the timer entirely. */
 void receive_ui_leave(void)
 {
+    if(!g_open) return;                       /* nothing to do - not our screen */
+    g_open = 0;
     if(g_tick){ lv_timer_delete(g_tick); g_tick = NULL; }
     int got = receive_got_files();
     receive_stop();

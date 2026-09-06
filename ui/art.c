@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "art.h"
+#include "imgconv.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,28 +42,14 @@ void art_cancel(void){
     pthread_mutex_unlock(&g_pid_mu);
 }
 
-/* Run the ffmpeg pipeline as a killable child (sh -c, own process group).
- * cancellable=1 registers the child for art_cancel(). Returns 0 on success. */
-int art_make_all_ex(const char *track, const char *cover_bmp,
-                    const char *thumb_bmp, const char *backdrop_bmp, int cancellable){
-    char esc[600]; shesc(track, esc, sizeof esc);
-    char cmd[1500];
-    /* Backdrop = the actual cover art, scaled to fill the screen and gaussian-blurred
-     * (iOS/Apple-Music "frosted cover" look). sigma chosen to soften detail while the
-     * cover is still recognisable as itself. */
-    snprintf(cmd, sizeof cmd,
-        "ffmpeg -y -loglevel quiet -i '%s' -an -filter_complex "
-        "'[0:v]split=3[a][b][c];[a]scale=148:148:flags=area[cv];[b]scale=42:42:flags=area[th];"
-        "[c]scale=360:360:flags=bilinear,gblur=sigma=19[bg]' "
-        "-map '[cv]' -pix_fmt bgr24 -f image2 '%s' "
-        "-map '[th]' -pix_fmt bgr24 -f image2 '%s' "
-        "-map '[bg]' -pix_fmt bgr24 -f image2 '%s'",
-        esc, cover_bmp, thumb_bmp, backdrop_bmp);
-
-    /* Hold g_pid_mu across fork + setpgid + register so art_cancel() can't run in
-     * the window between fork and registration (it would otherwise miss this child).
-     * Both parent and child call setpgid (idempotent race) so the process group is
-     * guaranteed to exist before we unlock -> kill(-pid) can't ESRCH on a missing pgid. */
+/* Run one ffmpeg command as a killable child (sh -c, own process group).
+ * cancellable=1 registers the child for art_cancel(). Returns 0 on success.
+ *
+ * Hold g_pid_mu across fork + setpgid + register so art_cancel() can't run in
+ * the window between fork and registration (it would otherwise miss this child).
+ * Both parent and child call setpgid (idempotent race) so the process group is
+ * guaranteed to exist before we unlock -> kill(-pid) can't ESRCH on a missing pgid. */
+static int art_run_cmd(const char *cmd, int cancellable){
     if(cancellable) pthread_mutex_lock(&g_pid_mu);
     pid_t pid = fork();
     if(pid < 0){ if(cancellable) pthread_mutex_unlock(&g_pid_mu); return -1; }
@@ -83,6 +70,29 @@ int art_make_all_ex(const char *track, const char *cover_bmp,
     }
     if(w < 0) return -1;                                            /* waitpid failed */
     if(!WIFEXITED(status) || WEXITSTATUS(status) != 0) return -1;   /* killed or ffmpeg error */
+    return 0;
+}
+
+/* Produce the three outputs from `src`. The filtergraph is identical whether the pixels
+ * come from the TRACK (normal path) or from a cover we had to extract and convert
+ * ourselves (the PNG path below), so it takes an input path rather than a track. */
+static int art_run_graph(const char *src, const char *cover_bmp,
+                         const char *thumb_bmp, const char *backdrop_bmp, int cancellable){
+    char esc[600]; shesc(src, esc, sizeof esc);
+    char cmd[1500];
+    /* Backdrop = the actual cover art, scaled to fill the screen and gaussian-blurred
+     * (iOS/Apple-Music "frosted cover" look). sigma chosen to soften detail while the
+     * cover is still recognisable as itself. */
+    snprintf(cmd, sizeof cmd,
+        "ffmpeg -y -loglevel quiet -i '%s' -an -filter_complex "
+        "'[0:v]split=3[a][b][c];[a]scale=148:148:flags=area[cv];[b]scale=42:42:flags=area[th];"
+        "[c]scale=360:360:flags=bilinear,gblur=sigma=19[bg]' "
+        "-map '[cv]' -pix_fmt bgr24 -f image2 '%s' "
+        "-map '[th]' -pix_fmt bgr24 -f image2 '%s' "
+        "-map '[bg]' -pix_fmt bgr24 -f image2 '%s'",
+        esc, cover_bmp, thumb_bmp, backdrop_bmp);
+
+    if(art_run_cmd(cmd, cancellable) != 0) return -1;
 
     /* all three outputs must exist + be non-trivial - catches a broken filtergraph
      * (e.g. a missing filter) immediately instead of shipping a half-written backdrop. */
@@ -93,6 +103,60 @@ int art_make_all_ex(const char *track, const char *cover_bmp,
         if(sz <= 100) return -1;
     }
     return 0;
+}
+
+/* PNG-cover fallback.
+ *
+ * The device's ffmpeg (4.2.2, stock, read-only rootfs) has NO png decoder - measured on
+ * hardware 2026-09-06; its image decoders are bmp, mjpeg, mjpegb and webp. So every
+ * track whose embedded cover is a PNG failed the graph above with
+ * "Decoder (codec png) not found" - which is most .m4a files and any MP3 tagged with a
+ * PNG. That is what "m4a album art does not work" actually was.
+ *
+ * ffmpeg can still COPY the picture out (a stream copy needs no decoder) and can read a
+ * BMP back in, so the only missing step is the PNG decode itself - and lodepng, vendored
+ * with LVGL, does that. Convert once, then run the SAME graph, so the scaling, the blur,
+ * the sizes and the cache contract downstream are all untouched.
+ *
+ * 4 megapixels: lodepng expands to RGBA, so that is a 16 MB transient on a device with
+ * ~48 MB available and an audio engine to keep fed. Bigger than that is refused rather
+ * than risking the player. */
+#define ART_PNG_MAX_PIXELS (4u*1000u*1000u)
+
+static int art_try_png_cover(const char *track, const char *cover_bmp,
+                             const char *thumb_bmp, const char *backdrop_bmp,
+                             int cancellable){
+    char raw[128], bmp[128];
+    /* getpid keeps two concurrent decodes (a prewarm and a track change) off each
+     * other's temporaries. */
+    snprintf(raw, sizeof raw, "/tmp/artpng_%d.png", (int)getpid());
+    snprintf(bmp, sizeof bmp, "/tmp/artpng_%d.bmp", (int)getpid());
+    remove(raw); remove(bmp);
+
+    char esc[600], eraw[300], cmd[1100];
+    shesc(track, esc, sizeof esc);
+    shesc(raw, eraw, sizeof eraw);
+    snprintf(cmd, sizeof cmd,
+        "ffmpeg -y -loglevel quiet -i '%s' -an -map 0:v:0 -c:v copy -f image2 '%s'",
+        esc, eraw);
+    if(art_run_cmd(cmd, cancellable) != 0 || !img_is_png(raw)){ remove(raw); return -1; }
+
+    int rc = img_png_to_bmp(raw, bmp, ART_PNG_MAX_PIXELS);
+    remove(raw);
+    if(rc != 0){ remove(bmp); return -1; }
+
+    rc = art_run_graph(bmp, cover_bmp, thumb_bmp, backdrop_bmp, cancellable);
+    remove(bmp);
+    return rc;
+}
+
+/* Try the direct graph, then the PNG bridge. A track with NO cover at all fails both and
+ * costs one extra ffmpeg spawn - accepted deliberately, because knowing in advance would
+ * mean parsing every container ourselves to find out. */
+int art_make_all_ex(const char *track, const char *cover_bmp,
+                    const char *thumb_bmp, const char *backdrop_bmp, int cancellable){
+    if(art_run_graph(track, cover_bmp, thumb_bmp, backdrop_bmp, cancellable) == 0) return 0;
+    return art_try_png_cover(track, cover_bmp, thumb_bmp, backdrop_bmp, cancellable);
 }
 
 /* Non-cancellable convenience wrapper (prewarm + synchronous fallback). */

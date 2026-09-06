@@ -3,6 +3,7 @@
 #include "wallpaper.h"
 #include "config.h"
 #include "fileutil.h"
+#include "imgconv.h"
 #include "txtfold.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -142,14 +143,27 @@ static int run_bounded(const char *cmd, int timeout_s){
  * chords. bilinear, not bicubic: this runs once per picture, but on a BogoMIPS-2387
  * core there is no reason to pay for the difference at 360px. */
 static int convert(const char *img, const char *out_bmp){
+    /* PNG first: this device's ffmpeg has no png decoder (see imgconv.h), so a .png
+     * wallpaper would have failed exactly the way m4a album art did. Decode it here and
+     * hand ffmpeg the BMP, which it can read. 16 MP allowed - this is a one-shot on a
+     * worker, and a phone photo is well inside it. */
+    char tmpbmp[160];
+    const char *use = img;
+    if(img_is_png(img)){
+        snprintf(tmpbmp,sizeof tmpbmp,"/tmp/wpsrc_%d.bmp",(int)getpid());
+        if(img_png_to_bmp(img, tmpbmp, 16u*1000u*1000u) != 0) return -1;
+        use = tmpbmp;
+    }
     char esc[600], eout[600], cmd[1600];
-    shesc(img, esc, sizeof esc);
+    shesc(use, esc, sizeof esc);
     shesc(out_bmp, eout, sizeof eout);
     snprintf(cmd, sizeof cmd,
         "ffmpeg -y -loglevel quiet -i '%s' -an -vframes 1 "
         "-vf 'scale=360:360:force_original_aspect_ratio=increase:flags=bilinear,crop=360:360' "
         "-pix_fmt bgr24 -f image2 '%s'", esc, eout);
-    if(run_bounded(cmd, WP_FFMPEG_TIMEOUT_S) != 0) return -1;
+    int rc = run_bounded(cmd, WP_FFMPEG_TIMEOUT_S);
+    if(use != img) remove(use);            /* drop the intermediate either way */
+    if(rc != 0) return -1;
     return file_ok(out_bmp) ? 0 : -1;
 }
 

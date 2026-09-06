@@ -772,7 +772,12 @@
 #endif
 
 /*LODEPNG decoder library*/
-#define LV_USE_LODEPNG 0
+/* 1, not 0: this links lodepng so imgconv.c can decode PNG. The device's ffmpeg has no
+ * PNG decoder (measured 2026-09-06 - bmp/mjpeg/mjpegb/webp only), which is why every
+ * m4a with a PNG cover showed no art. We are NOT relying on LVGL's PNG image decoder
+ * here; nothing hands LVGL a .png source, because decoding at draw time is the
+ * per-frame cost the whole art pipeline exists to avoid. */
+#define LV_USE_LODEPNG 1
 
 /*PNG decoder(libpng) library*/
 #define LV_USE_LIBPNG 0

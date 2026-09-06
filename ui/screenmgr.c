@@ -112,11 +112,21 @@ static void transition(int from, int to, int dir)
      * would swallow the rest of the chain whenever we leave the scan screen - and the
      * most important case is leaving it FOR the Library, right after a scan changed
      * what the Library should show. */
-    /* Receive owns a bound socket and a worker thread, so LEAVING it must tear that
-      * down. Separate from the entry chain below on purpose: an else-if there would be
-      * swallowed the moment any earlier branch matched, and a listener surviving the
-      * screen is exactly the failure this must not have. */
-    if (from == SCR_RECEIVE && to != SCR_RECEIVE) receive_ui_leave();
+    /* Receive owns a bound socket and a worker thread, so navigating AWAY must tear
+      * that down. Separate from the entry chain below on purpose: an else-if there
+      * would be swallowed the moment any earlier branch matched, and a listener
+      * surviving the screen is exactly the failure this must not have.
+      *
+      * SCR_SAVER is excluded because the screensaver is an OVERLAY, not navigation -
+      * screenmgr already special-cases it a few lines down. Tearing down there would
+      * kill the transfer the moment the screen slept, which at the default 1-minute
+      * timeout is guaranteed for any album-sized upload.
+      *
+      * Keyed on the DESTINATION rather than on `from == SCR_RECEIVE`: if the device
+      * ever left the saver to somewhere other than Receive, a `from` test would miss
+      * it and the socket would outlive the screen. receive_ui_leave() is a no-op when
+      * nothing is running, so calling it on every unrelated transition is free. */
+    if (to != SCR_RECEIVE && to != SCR_SAVER) receive_ui_leave();
     if (from == SCR_SCAN && to != SCR_SCAN) scanview_set_visible(0);
     else if (to == SCR_SCAN)               scanview_set_visible(1);
 
