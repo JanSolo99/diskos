@@ -178,7 +178,11 @@ static void prepare_one(const char *name){
     wp_dir(dir,sizeof dir);
     if(!dir[0]){ publish(NULL,NULL); return; }
 
-    char full[320];
+    /* dir + '/' + a 255-byte dirent name + NUL. Sized from its inputs rather than
+     * guessed at: truncating THIS path does not fail loudly, it silently addresses a
+     * different file - or none. (The cross compiler caught this; the host -Wall pass
+     * did not, so the Docker build stays the authority on warnings.) */
+    char full[sizeof(dir) + WP_NAME_MAX + 2];
     snprintf(full,sizeof full,"%s/%s",dir,name);
 
     char fp[24];
