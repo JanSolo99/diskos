@@ -107,12 +107,16 @@ music.
   adopted against, so a flash invalidates it - otherwise `/usr/data` surviving the flash would hand
   you back the build you already had).
   `python3 tests/s97check.py` runs the real S97 against a fake root across thirteen scenarios.
-  **The enabling reflash is DONE** - 2026-09-05, `F001 SUCCESS` in 91 minutes, usbboot exit=0, the
-  same 2 factory bad blocks at [383, 716] skipped as on the first flash, 0 retries, flash verified.
-  The device carries the update-slot S97 and `mq_ui` sha `66ece70f` (manifest, embedded copy and
-  local build all verified identical before the write).
-  **Device check still needed:** turn on On-Device Updates, deploy with `--persist`, reboot, confirm
-  the pushed build survives. That single test is what closes this tier.
+  **CONFIRMED ON HARDWARE 2026-09-06.** A build differing from the flashed one (`6aa3008e` vs the
+  rootfs manifest's `66ece70f`) was pushed with `--persist` and survived two reboots. The device log
+  shows both branches, which is why a differing binary was used rather than the same one:
+  `pending update adopted (sha 6aa3008e..., 3493432 bytes)` then `verified against ADOPTED update
+  manifest` on the adopting boot, and again on the NEXT boot via the fast path with no slot present.
+  The adopted manifest records `BASE=66ece70f`, so the reflash-wins guard is armed. **UI changes no
+  longer cost a reflash.**
+  One defect found doing it: `mq_ui.prev` ends up identical to the installed binary, because
+  `--persist` hot-swaps before the reboot, so the "outgoing" copy is already the new build. The
+  rollback is a copy of itself - see `docs/FEATURE_PLAN.md`.
 
 ## Tier 5 - power
 
@@ -126,16 +130,11 @@ top of `docs/POWER_OPTIMIZATION_PLAN.md`.
   UNMEASURED: the benefit is inferred from the radio being a real draw, not from a battery test.
 - [x] **Stop rendering to a dark panel** - done: `ui_screen_is_off()` now gates the 10s clock
   push and the 1 Hz analog-saver hands, matching how `ui_vinyl_spin` was already gated.
-- [ ] **Check whether `SONG(PATH)` is indexed on device** [device first]. Nothing in OUR SQL creates
-  one, and every `WHERE PATH=?` we issue would be a full table scan without it - including the
-  scanner's per-file merge (`UPD_SONG`), which would make a rescan roughly O(N^2) in library size.
-  But our `CREATE TABLE IF NOT EXISTS` is a no-op on a real device: `song.db` and its table were
-  built by the stock player, so whatever indexes exist are ITS choice and are not visible from the
-  source. Settle it before writing anything: `tools/diskos-probe.sh` section 3b runs
-  `PRAGMA index_list(SONG)` plus an `EXPLAIN QUERY PLAN`, which says SCAN or SEARCH outright.
-  If there is genuinely no index, a `CREATE INDEX IF NOT EXISTS` in the scanner's schema setup is
-  the whole fix and is probably the largest easy speedup left; if there is one, this costs nothing
-  to have asked.
+- [ ] **Index `SONG(PATH)`** [host]. **ANSWERED ON DEVICE 2026-09-06: there is no index.**
+  `PRAGMA index_list(SONG)` returns nothing and `EXPLAIN QUERY PLAN` says `SCAN TABLE SONG`, against
+  a library of **4821 rows**. The scanner does one such lookup PER FILE in `UPD_SONG`'s merge, so a
+  rescan is roughly 23 million row visits. One `CREATE INDEX IF NOT EXISTS` in the scanner's schema
+  setup is the whole fix, and it is now a measured win rather than a guess.
 - [ ] ~~Main loop 30ms floor~~ **DEPRIORITISED.** Measured: `mq_ui` idles at ~0.5% of one core.
   The wakeups are real but the cost is not; `core_timerevent` at ~490/s is the audio path, not
   us. Accurately described in the plan, worth almost nothing to fix.

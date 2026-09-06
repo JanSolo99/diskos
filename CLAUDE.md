@@ -485,15 +485,20 @@ is kept at `/usr/data/mq_ui.prev`, turning the setting off reinstalls the FLASHE
 dropping to stock, and a reflash always beats a standing adoption. `python3 tests/s97check.py` runs
 the real S97 against a fake root across thirteen scenarios.
 
-**That reflash is DONE** (2026-09-05, `F001 SUCCESS`, 91 min, usbboot exit=0, the same 2 factory
-bad blocks at [383, 716] skipped as on the first flash, 0 retries). The device now carries the
-update-slot S97 and `mq_ui` sha `66ece70f`, so `--persist` should work from here. S97 lives in the
-read-only rootfs, which is why it took a flash to get there; `--persist` refuses against an older
-S97 rather than arming a slot nothing will read.
+**The whole path is CONFIRMED ON HARDWARE** (reflash 2026-09-05 `F001 SUCCESS` in 91 min; adoption
+2026-09-06). A build differing from the flashed one was pushed with `--persist` and survived two
+reboots; the log shows `pending update adopted` then `verified against ADOPTED update manifest` on
+the adopting boot AND again on the next boot with no slot present, so both branches are proven.
+**UI changes no longer cost a reflash** - deploy with `--persist` and reboot.
 
-**Still unproven on hardware:** that the device actually boots the adopted binary. The next device
-session should turn on On-Device Updates, deploy with `--persist`, reboot, and confirm - that is the
-one step that closes Tier 4.
+Use a binary that DIFFERS from the flashed one when testing this. If they are identical, `verify_ui`
+matches the rootfs manifest first and returns before the adopted branch is ever reached, so the test
+passes without exercising the half that matters. Settings -> System -> About shows the build stamp,
+which is what makes "did my build actually land" answerable from the device.
+
+**Known defect:** `mq_ui.prev` ends up identical to the installed binary after a `--persist` adopt,
+because the deploy hot-swaps before the reboot - so the "outgoing" copy S97 preserves is already the
+new build, and the rollback is a copy of itself. See `docs/FEATURE_PLAN.md`.
 
 ### Known gaps, in rough order
 
