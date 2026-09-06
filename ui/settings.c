@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 diskOS contributors */
 #include "screens.h"
+#include "wallpaper.h"
 #include "config.h"
 #include "anim.h"
 #include "musicdb.h"
@@ -121,6 +122,9 @@ void settings_seed_charge_protect(void){
 static void apply_open_colorpick(int v){ (void)v; colorpick_open(); }   /* seed sliders from cfg + open */
 static void apply_debug_mode(int v){ (void)v; debug_open(); }           /* Settings -> System -> Debug Mode */
 static void apply_about(int v){ (void)v; screen_show(SCR_ABOUT); }      /* Settings -> System -> About */
+static void apply_wallpaper_pick(int v){ (void)v; wallpick_open(); }    /* Settings -> Display -> Wallpaper */
+/* The cycler owns the mode; wallpaper.c owns the conversion, so this only forwards. */
+static void apply_wallpaper_mode(int v){ wallpaper_set_mode(v); }
 
 /* Settings -> System -> On-Device Updates.
  *
@@ -343,6 +347,13 @@ static const char *const D_USBCONN[] = {
     "Act as a USB sound card for the computer.",
 };
 static const char *const OPT_ARTCACHE[] = { "Off","When Idle","Idle & Charging" };
+/* Order must match the WP_OFF/WP_IDLE/WP_ALWAYS enum in wallpaper.h. */
+static const char *const OPT_WPMODE[] = { "Never","When Idle","Always" };
+static const char *const D_WPMODE[] = {
+    "Never show the wallpaper. Home stays as it is: the blurred album art while something is loaded, black otherwise.",
+    "Show it when nothing is loaded. A track that is merely paused keeps its album art, so pausing does not change the background.",
+    "Always show it on Home, even while music is playing. Album art still fills Now Playing.",
+};
 /* audio cluster cyclers - all use min=-1 so the value can be "System default" (unmanaged) */
 static const char *const OPT_DRE[]    = { "Off", "On" };
 static const char *const OPT_REPLAYGAIN[] = { "Off", "Track", "Album" };
@@ -418,6 +429,13 @@ static const setting_t TABLE[] = {
       "Scale every label in the UI up or down together. The UI restarts to apply.", NULL },
     { "Display",  "Now Playing", ST_CYCLER, "np_style",   0,0,0, OPT_NPSTYLE, 2, NULL, apply_np_style, 0,
       "Album art style on the Now Playing screen.", D_NPSTYLE },
+    { "Display",  "Wallpaper",   ST_ACTION, NULL, 0,0,0, NULL,0, LV_SYMBOL_RIGHT, apply_wallpaper_pick, 0,
+      "Pick a picture to sit behind the Home screen. Put .jpg or .png files in a "
+      "Wallpapers folder at the top of the SD card, next to Music. Each one is converted "
+      "once and remembered, so it costs nothing to display after that.", NULL },
+    { "Display",  "Wallpaper Shows", ST_CYCLER, "wallpaper_mode", 0,0,0, OPT_WPMODE, 3, NULL, apply_wallpaper_mode, 0,
+      "When the wallpaper is used. Album art always wins on Now Playing; this is only "
+      "about Home.", D_WPMODE },
     { "Display",  "Accent Colour", ST_ACTION, NULL, 0,0,0, NULL,0, LV_SYMBOL_RIGHT, apply_open_colorpick, 0,
       "Now Playing accent: derived from album art, or any fixed colour you pick.", NULL },
     { "Display",  "Album Art Cache", ST_CYCLER, "artcache", 0,0,0, OPT_ARTCACHE, 3, NULL, apply_artcache, 0,

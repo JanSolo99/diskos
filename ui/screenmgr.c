@@ -317,6 +317,7 @@ void screens_init(void)
     s_roots[SCR_FONTPICK] = screen_make_root(parent);
     s_roots[SCR_QUEUE]    = screen_make_root(parent);
     s_roots[SCR_ABOUT]    = screen_make_root(parent);
+    s_roots[SCR_WALLPICK] = screen_make_root(parent);
 
     /* depth scrim: a full-screen translucent-black overlay, created LAST so it sits above the
      * roots in sibling order; re-parented in z during a transition to dim the screen beneath the
@@ -353,6 +354,7 @@ void screens_init(void)
     fontpick_create(s_roots[SCR_FONTPICK]);
     queue_create(s_roots[SCR_QUEUE]);
     about_create(s_roots[SCR_ABOUT]);
+    wallpick_create(s_roots[SCR_WALLPICK]);
     apps_create(s_roots[SCR_APPS]);
     nphub_create(s_roots[SCR_NPHUB]);
     plpick_create(s_roots[SCR_PLPICK]);

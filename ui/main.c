@@ -25,6 +25,7 @@
 #include "lvgl/lvgl.h"
 #include "fb_pan.h"
 #include "screens.h"
+#include "wallpaper.h"
 #include "anim.h"
 #include "ipc.h"
 #include "fwcaps.h"
@@ -1626,6 +1627,7 @@ int main(int argc, char **argv){
     weather_fetch_async();                       /* kick off first fetch */
     g_t_lyr = lv_timer_create(lyrics_poll, 500, NULL);    /* apply finished lyrics fetch */
     lastfm_init();                                        /* load Last.fm config + offline queue */
+    wallpaper_init();                                     /* adopt the stored wallpaper; converts on a worker */
     lv_timer_create(lastfm_tick, 1000, NULL);            /* watch play-state + drive scrobbles */
     lv_timer_create(scanner_poll, 500, NULL);            /* apply a finished library rescan */
     lv_timer_create(usb_connect_watch, 1000, NULL);      /* act on an unrequested USB-storage export */
@@ -1839,7 +1841,11 @@ int main(int argc, char **argv){
                                  st.have_track?st.artist:NULL,
                                  ui_current_accent(), playing);
             home_set_art_src(ui_current_thumb_src());
-            home_set_backdrop(ui_current_backdrop_src());
+            /* Home falls back to the user's wallpaper when there is no album art worth
+             * showing; the Saver deliberately does NOT - a black screensaver is the
+             * point of a screensaver, and painting a picture there would cost exactly
+             * the battery the saver exists to save. */
+            home_set_backdrop(wallpaper_home_src(ui_current_backdrop_src(), st.have_track));
             saver_set_track(st.have_track?st.title:NULL,
                             st.have_track?st.artist:NULL,
                             ui_current_backdrop_src());
@@ -1853,7 +1859,7 @@ int main(int argc, char **argv){
          * off (bl_state==2): it stays set and is applied on wake, else art goes stale. */
         if(bl_state != 2 && ui_take_art_applied()){
             home_set_art_src(ui_current_thumb_src());
-            home_set_backdrop(ui_current_backdrop_src());
+            home_set_backdrop(wallpaper_home_src(ui_current_backdrop_src(), st.have_track));
             saver_set_track(st.have_track?st.title:NULL,
                             st.have_track?st.artist:NULL,
                             ui_current_backdrop_src());
