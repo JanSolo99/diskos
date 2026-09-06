@@ -13,6 +13,11 @@
 
 enum { WP_OFF = 0, WP_IDLE = 1, WP_ALWAYS = 2 };
 
+/* A dirent name can be 255 bytes. Truncating one would produce a name that no longer
+ * OPENS, silently, so every buffer that holds a wallpaper filename is sized for the
+ * worst case the filesystem can actually hand us. */
+#define WP_NAME_MAX 256
+
 /* Boot: adopt the stored mode/file and, if a wallpaper is wanted, prepare it on a
  * detached worker. Never blocks. */
 void wallpaper_init(void);
@@ -20,7 +25,7 @@ void wallpaper_init(void);
 /* Picker: names (basenames) of the images found on the card. Returns how many were
  * written. `disp` receives an ASCII-folded copy for drawing - the name in `names` keeps
  * its exact bytes, because that is what has to open. */
-int  wallpaper_list(char names[][128], char disp[][128], int cap);
+int  wallpaper_list(char names[][WP_NAME_MAX], char disp[][WP_NAME_MAX], int cap);
 
 /* Choose one (a basename from wallpaper_list, or NULL/"" for none) and persist it.
  * Kicks the conversion on a worker; wallpaper_src() starts returning it when ready. */

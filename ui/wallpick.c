@@ -17,8 +17,8 @@
 #define MAX_WP 64
 
 static lv_obj_t *g_root, *g_list;
-static char g_names[MAX_WP][128];   /* exact bytes - this is what opens the file */
-static char g_disp [MAX_WP][128];   /* ASCII-folded copy - this is what we draw */
+static char g_names[MAX_WP][WP_NAME_MAX];   /* exact bytes - this is what opens the file */
+static char g_disp [MAX_WP][WP_NAME_MAX];   /* ASCII-folded copy - this is what we draw */
 static int  g_n;
 
 static void pick_cb(lv_event_t *e)

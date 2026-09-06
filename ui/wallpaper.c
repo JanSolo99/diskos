@@ -2,6 +2,7 @@
 /* Copyright (C) 2026 diskOS contributors */
 #include "wallpaper.h"
 #include "config.h"
+#include "fileutil.h"
 #include "txtfold.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,7 +53,7 @@ static char        g_src[160];              /* "A:/tmp/wp_<fp>.bmp", or empty */
 static char        g_work[160];             /* the /tmp file g_src points at, for cleanup */
 static atomic_int  g_busy;                  /* 1 while a conversion is in flight */
 static int         g_mode;
-static char        g_file[128];             /* selected basename, "" = none */
+static char        g_file[WP_NAME_MAX];     /* selected basename, "" = none */
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -183,7 +184,7 @@ static void prepare_one(const char *name){
     char fp[24];
     if(fingerprint(full,fp,sizeof fp)!=0){ publish(NULL,NULL); return; }
 
-    char cached[320], work[160], src[160];
+    char cached[320], work[192], src[sizeof work + 8];
     snprintf(cached,sizeof cached,"%s/%s.bmp",WP_CACHE,fp);
     snprintf(work  ,sizeof work  ,"/tmp/wp_%s.bmp",fp);
     snprintf(src   ,sizeof src   ,"A:%s",work);
@@ -193,11 +194,11 @@ static void prepare_one(const char *name){
 
     if(file_ok(cached)){
         /* Cache hit: copy SD -> tmpfs. LVGL reads from tmpfs on purpose (the card is
-         * slow), which is the same reason ui.c stages cover/thumb/backdrop there. */
-        char cmd[800], a[400], b[400];
-        shesc(cached,a,sizeof a); shesc(work,b,sizeof b);
-        snprintf(cmd,sizeof cmd,"cp -f '%s' '%s'",a,b);
-        if(run_bounded(cmd,10)==0 && file_ok(work)){ publish(work,src); return; }
+         * slow), which is the same reason ui.c stages cover/thumb/backdrop there.
+         * file_copy_atomic rather than a shelled `cp`: no fork, no /bin/sh, no quoting
+         * of a filename that came off the card - and dst never exists half-written, so
+         * a reader cannot catch a partial wallpaper. */
+        if(file_copy_atomic(cached, work, 0)==0 && file_ok(work)){ publish(work,src); return; }
     }
 
     /* Miss: convert once, then keep it on the card so this never happens again for
@@ -206,23 +207,20 @@ static void prepare_one(const char *name){
     if(enough_free()){
         mkdir("/tmp/sdcard/.diskos",0755);   /* ignore EEXIST */
         mkdir(WP_CACHE,0755);
-        char cmd[800], a[400], b[400];
-        shesc(work,a,sizeof a); shesc(cached,b,sizeof b);
-        snprintf(cmd,sizeof cmd,"cp -f '%s' '%s'",a,b);
-        run_bounded(cmd,15);                 /* best effort: a failed cache is not a failure */
+        file_copy_atomic(work, cached, 0);   /* best effort: a failed cache is not a failure */
     }
     publish(work,src);
 }
 
 static void *prepare_worker(void *arg){
     (void)arg;
-    char last[128] = "";
+    char last[WP_NAME_MAX] = "";
     /* Loop until the selection stops moving. Picking a second wallpaper while the first
      * was still converting used to be dropped on the floor: prepare_async's
      * compare-exchange saw g_busy, returned, and nothing ever retried - so the newest
      * choice silently never appeared. */
     for(;;){
-        char name[128];
+        char name[WP_NAME_MAX];
         pthread_mutex_lock(&g_mu);
         snprintf(name,sizeof name,"%s",g_file);
         pthread_mutex_unlock(&g_mu);
@@ -277,10 +275,10 @@ int wallpaper_list(char names[][128], char disp[][128], int cap){
     while(n < cap && (e = readdir(d))){
         if(e->d_name[0]=='.') continue;
         if(!is_image(e->d_name)) continue;
-        snprintf(names[n],128,"%s",e->d_name);
+        snprintf(names[n],WP_NAME_MAX,"%s",e->d_name);
         /* Fold only the DISPLAY copy. The name in names[] has to keep its exact bytes,
          * because that is what opens the file - the same split wifi.c makes for SSIDs. */
-        snprintf(disp[n],128,"%s",e->d_name);
+        snprintf(disp[n],WP_NAME_MAX,"%s",e->d_name);
         txt_fold_ascii(disp[n]);
         n++;
     }

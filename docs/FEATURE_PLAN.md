@@ -223,6 +223,29 @@ because our `CREATE TABLE IF NOT EXISTS` is a no-op against the stock player's t
 
 ---
 
+## PARKED - waiting on the device, do these the moment it is back
+
+Both are built and host-tested; neither can be finished without hardware. Flagged here
+rather than left in a conversation, because that is where things get lost.
+
+1. **Wallpaper: deploy and look at it.** `--persist` the current build, put a couple of
+   .jpg files in `Wallpapers/` at the top of the card, then Settings -> Display ->
+   Wallpaper. Three things are unverified and only the device can answer them:
+   - that `scale=...:force_original_aspect_ratio=increase,crop=360:360` yields a BMP LVGL
+     accepts. The album-art path proves ffmpeg -> BMP -> LVGL, but not this filtergraph.
+   - how a SHARP photo reads under `th_scrim_opa()`, which was tuned for a BLURRED cover.
+     If the clock is hard to read, the wallpaper needs its own opacity rather than
+     borrowing the backdrop's.
+   - the real conversion time for a large (12 MP) JPEG on a BogoMIPS-2387 core. The 25s
+     bound is a guess until measured; if a normal photo comes close to it, the bound is
+     wrong, not the photo.
+2. **Rescan.** Populates year and bitrate (scanner changes need one), and is the first
+   real exercise of the new `SONG(PATH)` index - the thing that turns a rescan from
+   ~23 million row visits into an indexed lookup per file. Worth timing before and after
+   if you still have a stopwatch handy.
+
+---
+
 ## Suggested order
 
 1. The two defects above - both small, both measured, and one of them is a safety net that
