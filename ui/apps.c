@@ -137,6 +137,7 @@ void apps_reload(void){
     make_tile(LV_SYMBOL_USB,       th_font(28), "Mode",     mode_row_cb, NULL);
     make_tile(LV_SYMBOL_SETTINGS,  th_font(28), "EQ",       nav_row_cb, (void*)(uintptr_t)SCR_EQ);
     make_tile(LV_SYMBOL_REFRESH,   th_font(28), "Scan",     scan_row_cb, NULL);
+    make_tile(LV_SYMBOL_DOWNLOAD,  th_font(28), "Receive",  nav_row_cb, (void*)(uintptr_t)SCR_RECEIVE);
     make_tile(WEATHER_CLOUD,       &font_weather16, "Weather",  weather_row_cb, NULL);
     /* built-in: Last.fm scrobbling (the FA lastfm brand glyph) */
     make_tile(LFM_ICON, &font_icons_28, "Last.fm", lastfm_row_cb, NULL);

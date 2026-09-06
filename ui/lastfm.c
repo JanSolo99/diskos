@@ -428,7 +428,10 @@ static int lfm_busy(void){ pthread_mutex_lock(&g_mu); int b=g_inflight||g_result
 
 /* ---- the API calls the worker performs (build params + sign+post+parse) ---- */
 static int lfm_do_nowplaying(const lfm_job_t *j, lfm_api_response_t *out){
-    char dur[16]; snprintf(dur,sizeof dur,"%ld", j->duration_s>0?j->duration_s:0);
+    /* 24, not 16: a 32-bit long needs 11 chars + NUL so the DEVICE was always fine, but
+      * the host build has a 64-bit long and warns. Sized for any long, so the warning
+      * baseline stays clean and a real one cannot hide in the noise. */
+    char dur[24]; snprintf(dur,sizeof dur,"%ld", j->duration_s>0?j->duration_s:0);
     lfm_param_t p[7]; int n=0;
     p[n++]=(lfm_param_t){"api_key",j->api_key};
     p[n++]=(lfm_param_t){"artist", j->artist};
@@ -440,7 +443,7 @@ static int lfm_do_nowplaying(const lfm_job_t *j, lfm_api_response_t *out){
     return lfm_api_call(p,(size_t)n,j->secret,out);
 }
 static int lfm_do_scrobble(const lfm_job_t *j, lfm_api_response_t *out){
-    char dur[16], ts[16];
+    char dur[24], ts[24];   /* see lfm_do_nowplaying: sized for a 64-bit long */
     snprintf(dur,sizeof dur,"%ld", j->duration_s>0?j->duration_s:0);
     snprintf(ts, sizeof ts, "%ld", j->timestamp);
     lfm_param_t p[8]; int n=0;

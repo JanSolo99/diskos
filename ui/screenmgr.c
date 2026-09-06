@@ -112,6 +112,11 @@ static void transition(int from, int to, int dir)
      * would swallow the rest of the chain whenever we leave the scan screen - and the
      * most important case is leaving it FOR the Library, right after a scan changed
      * what the Library should show. */
+    /* Receive owns a bound socket and a worker thread, so LEAVING it must tear that
+      * down. Separate from the entry chain below on purpose: an else-if there would be
+      * swallowed the moment any earlier branch matched, and a listener surviving the
+      * screen is exactly the failure this must not have. */
+    if (from == SCR_RECEIVE && to != SCR_RECEIVE) receive_ui_leave();
     if (from == SCR_SCAN && to != SCR_SCAN) scanview_set_visible(0);
     else if (to == SCR_SCAN)               scanview_set_visible(1);
 
@@ -123,6 +128,7 @@ static void transition(int from, int to, int dir)
     else if (to == SCR_QUEUE)  queue_refresh();    /* re-aim at the player's current list + rebuild rows */
     else if (to == SCR_SONGINFO) songinfo_refresh();  /* Year/Bitrate come from song.db, not the player */
     else if (to == SCR_ABOUT)   about_refresh();      /* firmware + the updates flag, read fresh */
+    else if (to == SCR_RECEIVE) receive_ui_enter();   /* starts the server + the 1Hz tick */
     else if (to == SCR_LIBRARY) library_refresh(); /* pick up playlists created (NP New Playlist) or imported
                                                     * (Settings) elsewhere, without needing a restart */
 
@@ -318,6 +324,7 @@ void screens_init(void)
     s_roots[SCR_QUEUE]    = screen_make_root(parent);
     s_roots[SCR_ABOUT]    = screen_make_root(parent);
     s_roots[SCR_WALLPICK] = screen_make_root(parent);
+    s_roots[SCR_RECEIVE]  = screen_make_root(parent);
 
     /* depth scrim: a full-screen translucent-black overlay, created LAST so it sits above the
      * roots in sibling order; re-parented in z during a transition to dim the screen beneath the
@@ -355,6 +362,7 @@ void screens_init(void)
     queue_create(s_roots[SCR_QUEUE]);
     about_create(s_roots[SCR_ABOUT]);
     wallpick_create(s_roots[SCR_WALLPICK]);
+    receive_create(s_roots[SCR_RECEIVE]);
     apps_create(s_roots[SCR_APPS]);
     nphub_create(s_roots[SCR_NPHUB]);
     plpick_create(s_roots[SCR_PLPICK]);

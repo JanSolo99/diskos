@@ -265,7 +265,7 @@ void wallpaper_init(void){
     if(g_mode != WP_OFF && g_file[0]) prepare_async();
 }
 
-int wallpaper_list(char names[][128], char disp[][128], int cap){
+int wallpaper_list(char names[][WP_NAME_MAX], char disp[][WP_NAME_MAX], int cap){
     char dir[160]; wp_dir(dir,sizeof dir);
     if(!dir[0]) return 0;
     DIR *d = opendir(dir);
