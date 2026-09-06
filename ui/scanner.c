@@ -946,6 +946,20 @@ static void *scan_thread(void *arg){
         sqlite3_exec(g_db, "ALTER TABLE SONG ADD COLUMN IS_M3U INT DEFAULT 0;", 0,0,0);
         sqlite3_exec(g_db, "ALTER TABLE SONG ADD COLUMN M3U_PATH TEXT DEFAULT '';", 0,0,0);
         sqlite3_exec(g_db, "ALTER TABLE SONG ADD COLUMN ACCENT INTEGER DEFAULT 0;", 0,0,0);
+        /* An index on PATH. Measured on a real device 2026-09-06: PRAGMA index_list(SONG)
+         * returned NOTHING and EXPLAIN QUERY PLAN said "SCAN TABLE SONG", against a library
+         * of 4821 rows. This matters because the merge below does one "WHERE PATH=?" UPDATE
+         * PER FILE, so a rescan was ~23 million row visits - quadratic in library size.
+         *
+         * Not visible from the source before that measurement: song.db and its SONG table are
+         * the STOCK player's, so our CREATE TABLE IF NOT EXISTS above is a no-op on a real
+         * device and says nothing about what indexes exist.
+         *
+         * Safe to add to a table we share: an index changes only the plan, never a result, so
+         * the stock player cannot observe it except as speed. Named with a diskos_ prefix so
+         * it is identifiable as ours. IF NOT EXISTS makes it idempotent, and it is deliberately
+         * created BEFORE the scan transaction so the very first merge already benefits. */
+        sqlite3_exec(g_db, "CREATE INDEX IF NOT EXISTS diskos_song_path ON SONG(PATH);", 0,0,0);
         /* PROVE the required columns exist (a duplicate-column ALTER error is fine, but a real
          * failure - BUSY/FULL/IOERR/corruption - is not). If any is missing, flag a scan error so
          * the commit gate below rolls back and KEEPS the existing library rather than rebuilding one

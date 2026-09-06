@@ -15,7 +15,8 @@ decisions obvious, so they come first.
 | `/usr/data` | 67.6 MB, **51.8 MB free** | Where our binary and any new payload live. This is the hard ceiling on shipped code. |
 | SD card | 59.4 GB, 14.7 GB free, exfat, mounted **rw** at `/tmp/sdcard` | Music and wallpapers go here. Writable while the player holds it. |
 | Library | **4821 songs** | Big enough that O(N^2) work in the scanner is felt. |
-| `/dev/net/tun` | **ABSENT**, no module tree, no `iptables` | Decides the Tailscale question outright - see below. |
+| `/dev/net/tun` | **ABSENT**, no `iptables` | No VPN as shipped. But modules ARE loadable (8 live, from `/module_driver/` inside our own rootfs), so this is a module build, not a kernel rebuild. |
+| Kernel cmdline | `mem=128M`, `root=...rootfstype=squashfs ro` | 128 MB is the real ceiling on any resident daemon. |
 | busybox | `wget` (with TLS), `tftp`, `unzip`, `udhcpc`. **No `httpd`, no `nc`, no `timeout`** | We cannot lean on stock tools for a server; we can for HTTPS fetching. |
 | LVGL build | `lodepng`, `tjpgd`, `qrcode` already compiled in | PNG/JPEG decode and QR rendering are free. |
 
@@ -109,15 +110,21 @@ a worker thread - is the part already written and shipping in `lastfm.c`.
 
 **Verdict on Tailscale ON THE DEVICE: don't.** This is a measurement, not an opinion.
 
-- `/dev/net/tun` is **absent**, `/proc/misc` has no `tun`, there is no `/lib/modules` tree
-  and no `tun.ko` anywhere. Standard `tailscaled` cannot work.
-- We do **not own the kernel** - it is stock FiiO 4.4.94, not rebuilt - so adding TUN means
-  taking on the kernel, which is a different and much larger project.
-- Tailscale's userspace mode (`--tun=userspace-networking`) does avoid TUN, but: it is Go,
-  upstream ships no MIPS32 build, the combined binary is roughly 30 MB against 51.8 MB
-  free, and `tailscaled` commonly sits at 30-60 MB RSS against ~60 MB available. It would
-  be competing for memory with the audio engine. The failure mode is not "slow" - it is
-  the player being starved.
+- `/dev/net/tun` is **absent** and `/proc/misc` has no `tun`, so standard `tailscaled`
+  cannot work as shipped.
+- **TUN is not the real blocker, though.** Loadable modules ARE supported: `/proc/modules`
+  lists 8 live vendor modules, `insmod` and `/sbin/modprobe` are present, and they load
+  from **`/module_driver/`** - a directory inside the rootfs we already rewrite to install
+  S97. Adding TUN is therefore a MODULE build, not a kernel replacement: drop a `tun.ko`
+  in beside `bcmdhd.ko` and insmod it at boot. A bad module is undone by a reboot, the
+  partition table has `kernel2`/`rootfs2` A/B slots, and mask-ROM recovery is always one
+  Vol-Down away. The genuine cost is getting FiiO's exact 4.4.94 source (GPL, so it is
+  owed), the exact Ingenic gcc 7.2.0 toolchain, and a matching `vermagic`.
+- **The binding constraint is MEMORY.** The kernel command line says `mem=128M`, shared
+  with the audio engine. Tailscale's userspace mode avoids TUN but is Go, ships no MIPS32
+  build upstream, is roughly 30 MB against 51.8 MB free, and commonly sits at 30-60 MB RSS
+  against ~60 MB available. Even WITH `tun.ko` it would be competing with `mq_player` for
+  memory, and the failure mode there is not "slow" - it is the player being starved.
 
 **But you can have the whole outcome you actually asked for, without any of that.**
 

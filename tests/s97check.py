@@ -373,6 +373,57 @@ def t_legacy_adopted_manifest_dropped():
         f.cleanup()
 
 
+def t_prev_not_clobbered_by_an_identical_adopt():
+    scenario("N. slot equals the INSTALLED binary -> mq_ui.prev is not overwritten with a copy of itself")
+    f = Fixture()
+    try:
+        # This is the --persist flow, and it shipped broken. diskos-deploy.sh hot-swaps the
+        # new build into /usr/data/mq_ui before the reboot, so when S97 adopts the slot the
+        # "outgoing" copy is ALREADY the incoming one. Moving it aside leaves a rollback
+        # that is a copy of itself AND destroys the last genuinely different build.
+        f.manifest(FLASHED)
+        f.write("opt/diskos/mq_ui", FLASHED)
+        f.write("usr/data/mq_ui", LOCAL)             # hot-deployed already
+        f.write("usr/data/mq_ui.prev", FLASHED)      # the real previous build
+        f.link_player()
+        f.touch("usr/data/diskos_updates_enabled")
+        f.write("usr/data/diskos_update/mq_ui", LOCAL)          # same bytes as installed
+        f.write("usr/data/diskos_update/mq_ui.sha256", (sha(LOCAL) + "  mq_ui\n").encode())
+        r = f.run()
+        check("exit 0", r.returncode == 0, r.stderr)
+        check("boots diskOS", f.booted_diskos())
+        check("installed is the update", f.read("usr/data/mq_ui") == LOCAL)
+        check("mq_ui.prev STILL holds the genuinely previous build",
+              f.exists("usr/data/mq_ui.prev") and f.read("usr/data/mq_ui.prev") == FLASHED)
+        check("prev is not a copy of what is installed",
+              f.read("usr/data/mq_ui.prev") != f.read("usr/data/mq_ui"))
+        check("logged why it kept it", "keeping the existing mq_ui.prev" in f.log(), f.log())
+    finally:
+        f.cleanup()
+
+
+def t_prev_updated_when_the_build_really_changes():
+    scenario("O. slot DIFFERS from the installed binary -> mq_ui.prev is updated to it")
+    f = Fixture()
+    try:
+        f.manifest(FLASHED)
+        f.write("opt/diskos/mq_ui", FLASHED)
+        f.write("usr/data/mq_ui", FLASHED)           # nothing hot-deployed this time
+        f.write("usr/data/mq_ui.prev", LOCAL2)       # some older build
+        f.link_player()
+        f.touch("usr/data/diskos_updates_enabled")
+        f.write("usr/data/diskos_update/mq_ui", LOCAL)
+        f.write("usr/data/diskos_update/mq_ui.sha256", (sha(LOCAL) + "  mq_ui\n").encode())
+        r = f.run()
+        check("exit 0", r.returncode == 0, r.stderr)
+        check("boots diskOS", f.booted_diskos())
+        check("installed is the update", f.read("usr/data/mq_ui") == LOCAL)
+        check("mq_ui.prev is now the binary that was replaced",
+              f.read("usr/data/mq_ui.prev") == FLASHED)
+    finally:
+        f.cleanup()
+
+
 def t_no_manifest_fails_closed():
     scenario("I. no rootfs manifest -> quarantine, stock UI (unchanged behaviour)")
     f = Fixture()
@@ -432,7 +483,9 @@ def main():
               t_malformed_adopted, t_flag_removed_reverts_to_flashed,
               t_no_manifest_fails_closed, t_unverified_local_build_quarantined,
               t_shape_gate_still_applies_to_rootfs_path,
-              t_reflash_beats_an_adoption, t_legacy_adopted_manifest_dropped):
+              t_reflash_beats_an_adoption, t_legacy_adopted_manifest_dropped,
+              t_prev_not_clobbered_by_an_identical_adopt,
+              t_prev_updated_when_the_build_really_changes):
         t()
     print("")
     if FAILURES:

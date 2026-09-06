@@ -214,12 +214,28 @@ apply_pending_update() {
     # would quarantine.
     printf 'SHA256=%s\nSIZE=%s\nBASE=%s\n' "$got" "$sz" "$MSHA" > "$ADOPTED" 2>/dev/null
     ASHA="$got"; ASIZE="$sz"
-    # Keep the outgoing binary for a hand rollback. A RENAME, not a copy: it costs no
-    # flash, and it also empties /usr/data/mq_ui so the pre-emptive quarantine below has
-    # only the symlink left to drop - otherwise a second copy of the same bytes would
-    # land in mq_ui.rejected as well. One rollback deep is deliberate; a chain of them is
-    # dead weight on a device whose recovery story is "push it again".
-    [ -f /usr/data/mq_ui ] && mv -f /usr/data/mq_ui /usr/data/mq_ui.prev 2>/dev/null
+    # Keep the outgoing binary for a hand rollback - but ONLY when it is genuinely a
+    # different build. Measured on hardware 2026-09-06: after a --persist adopt, .prev was
+    # byte-identical to the binary just installed, so the rollback was a copy of itself.
+    # The cause is the deploy flow, not this script: diskos-deploy.sh hot-swaps the new
+    # build into /usr/data/mq_ui BEFORE the reboot, so by the time we adopt the slot the
+    # "outgoing" copy is already the incoming one. Overwriting .prev with it also destroys
+    # the last genuinely different build, which is the one you would actually roll back to.
+    #
+    # A RENAME, not a copy, when it does differ: it costs no flash, and it empties
+    # /usr/data/mq_ui so the pre-emptive quarantine below has only the symlink left to
+    # drop. One rollback deep is deliberate; a chain of them is dead weight on a device
+    # whose recovery story is "push it again".
+    #
+    # The extra sha256 is ~3.5MB hashed on an ADOPTING boot only - not on every boot.
+    if [ -f /usr/data/mq_ui ]; then
+        cur=$(sha256sum /usr/data/mq_ui | cut -d' ' -f1)
+        if [ "$cur" != "$got" ]; then
+            mv -f /usr/data/mq_ui /usr/data/mq_ui.prev 2>/dev/null
+        else
+            log "outgoing binary is already this update -> keeping the existing mq_ui.prev"
+        fi
+    fi
     rm -rf "$UPD_DIR" 2>/dev/null
     log "pending update adopted (sha $got, $sz bytes); previous kept at /usr/data/mq_ui.prev"
     return 0
